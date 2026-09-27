@@ -183,7 +183,7 @@ Allocation balances use divided rows with tabular allowance, used, and remaining
 
 The allocation edit form shows the server-calculated effective date before saving. For a new time-window rule scheduled to start next period, preview the date from its longest entered condition. Surface live price-coverage warnings near the current rule and in the edit form: current catalog prices win, previously saved prices cover gaps, and models missing from a revision's saved rates remain blocked until a new revision takes effect. Keep catalog-price gaps, saved-rate gaps, and temporarily unavailable account catalogs distinct; recompute these warnings on reads instead of storing them in rule config. Keep the distinct blank-value explanations beside direct member inputs and time-window condition inputs.
 
-An uncovered-model warning includes the server-calculated edit effective date, so administrators can see when saving a price update will actually permit that model.
+An uncovered-model warning includes the server-calculated edit effective date, so administrators can see when saving a price update will actually permit that model. For an already scheduled revision, use its saved effective date and past-tense scheduling copy.
 
 Administrator allocation reports expose refresh and inline Token correction forms beside pending request IDs, with explicit M units and error feedback. Personal allocations reuse the balance presentation without editing or settlement controls, with visible loading, failure, empty, and refresh states.
 

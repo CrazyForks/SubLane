@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math/big"
 	"slices"
 	"sort"
@@ -266,16 +267,45 @@ func (s *Service) Schemes(ctx context.Context) ([]Scheme, error) {
 		return nil, err
 	}
 	out := make([]Scheme, 0, len(rows))
+	now := s.now().Unix()
+	needsCoverage := false
 	for _, r := range rows {
-		v, err := s.readScheme(ctx, q, r.ID, s.now().Unix())
+		v, err := s.readSchemeCore(ctx, q, r.ID, now)
 		if err != nil {
 			return nil, err
 		}
+		needsCoverage = needsCoverage || schemeNeedsPriceCoverage(v)
 		out = append(out, v)
+	}
+	if !needsCoverage || s.pricing == nil {
+		return out, nil
+	}
+	catalogs, err := loadAllocationPoolCatalogs(ctx, q, s.tenantID)
+	if err != nil {
+		return nil, err
+	}
+	for index := range out {
+		catalog := catalogs[out[index].GroupID]
+		if catalog == nil {
+			return nil, fmt.Errorf("allocation pool %d missing from batch catalog", out[index].GroupID)
+		}
+		if err := s.fillPriceCoverage(ctx, q, &out[index], catalog); err != nil {
+			return nil, err
+		}
 	}
 	return out, nil
 }
 func (s *Service) readScheme(ctx context.Context, q *db.Queries, id, now int64) (Scheme, error) {
+	out, err := s.readSchemeCore(ctx, q, id, now)
+	if err != nil {
+		return out, err
+	}
+	if err := s.fillPriceCoverage(ctx, q, &out, nil); err != nil {
+		return out, err
+	}
+	return out, nil
+}
+func (s *Service) readSchemeCore(ctx context.Context, q *db.Queries, id, now int64) (Scheme, error) {
 	r, err := q.GetTenantAllocationScheme(ctx, db.GetTenantAllocationSchemeParams{ID: id, TenantID: s.tenantID})
 	if err != nil {
 		return Scheme{}, ErrNotFound
@@ -302,17 +332,29 @@ func (s *Service) readScheme(ctx context.Context, q *db.Queries, id, now int64) 
 	} else if !errors.Is(e, sql.ErrNoRows) {
 		return out, e
 	}
-	if s.pricing != nil && (pricedConfig(out.Config) || (out.Next != nil && pricedConfig(out.Next.Config))) {
-		catalog, err := loadPoolModelCatalog(ctx, q, out.GroupID)
-		if err != nil {
-			return out, err
-		}
-		out.PriceCoverage = s.priceCoverage(catalog, out.Revision)
-		if out.Next != nil {
-			out.Next.PriceCoverage = s.priceCoverage(catalog, *out.Next)
-		}
-	}
 	return out, nil
+}
+
+func schemeNeedsPriceCoverage(scheme Scheme) bool {
+	return pricedConfig(scheme.Config) || (scheme.Next != nil && pricedConfig(scheme.Next.Config))
+}
+
+func (s *Service) fillPriceCoverage(ctx context.Context, q *db.Queries, scheme *Scheme, catalog *poolModelCatalog) error {
+	if s.pricing == nil || !schemeNeedsPriceCoverage(*scheme) {
+		return nil
+	}
+	if catalog == nil {
+		loaded, err := loadPoolModelCatalog(ctx, q, scheme.GroupID)
+		if err != nil {
+			return err
+		}
+		catalog = &loaded
+	}
+	scheme.PriceCoverage = s.priceCoverage(*catalog, scheme.Revision)
+	if scheme.Next != nil {
+		scheme.Next.PriceCoverage = s.priceCoverage(*catalog, *scheme.Next)
+	}
+	return nil
 }
 func (s *Service) SaveScheme(ctx context.Context, id int64, in SchemeInput) (Scheme, error) {
 	if id < 0 || !validName(in.Name) || in.GroupID <= 0 {
@@ -363,7 +405,7 @@ func (s *Service) SaveScheme(ctx context.Context, id int64, in SchemeInput) (Sch
 	}
 	var previousRates []Rate
 	if id != 0 {
-		previous, err := s.readScheme(ctx, q, id, now)
+		previous, err := s.readSchemeCore(ctx, q, id, now)
 		if err != nil {
 			return Scheme{}, err
 		}
@@ -376,7 +418,8 @@ func (s *Service) SaveScheme(ctx context.Context, id int64, in SchemeInput) (Sch
 			previousRates = append(previousRates, previous.Next.Config.Rates...)
 		}
 	}
-	if err = s.applyPrices(ctx, q, in.GroupID, &in.Config, previousRates); err != nil {
+	catalog, err := s.applyPrices(ctx, q, in.GroupID, &in.Config, previousRates)
+	if err != nil {
 		return Scheme{}, err
 	}
 	if err := normalize(&in.Config); err != nil {
@@ -433,8 +476,11 @@ func (s *Service) SaveScheme(ctx context.Context, id int64, in SchemeInput) (Sch
 	if err = audit.Record(ctx, q, "allocation.save", "allocation", audit.ID(id)); err != nil {
 		return Scheme{}, err
 	}
-	out, err := s.readScheme(ctx, q, id, now)
+	out, err := s.readSchemeCore(ctx, q, id, now)
 	if err != nil {
+		return Scheme{}, err
+	}
+	if err := s.fillPriceCoverage(ctx, q, &out, catalog); err != nil {
 		return Scheme{}, err
 	}
 	return out, tx.Commit()
@@ -444,6 +490,22 @@ type poolModelCatalog struct {
 	policy      groups.ModelPolicy
 	models      []string
 	unavailable bool
+}
+
+func (catalog *poolModelCatalog) addAccount(provider string, snapshot []byte, revision int64, seen map[string]bool) {
+	accountCatalog, err := accounts.DecodeCatalog(snapshot, revision)
+	if err != nil || accountCatalog.UpdatedAt == 0 {
+		catalog.unavailable = true
+		return
+	}
+	for _, model := range accountCatalog.Models {
+		_, native := groups.SplitModel(model)
+		// The policy needs the account provider to enforce provider-scoped allowlists.
+		if catalog.policy.Allows(provider+"/"+native) && !seen[native] {
+			seen[native] = true
+			catalog.models = append(catalog.models, native)
+		}
+	}
 }
 
 func pricedConfig(config Config) bool {
@@ -465,27 +527,54 @@ func loadPoolModelCatalog(ctx context.Context, q *db.Queries, groupID int64) (po
 	if err != nil {
 		return poolModelCatalog{}, err
 	}
-	models := map[string]bool{}
+	seen := map[string]bool{}
 	for _, row := range rows {
-		accountCatalog, err := accounts.DecodeCatalog(row.ModelsSnapshot, row.ModelsRevision)
-		if err != nil || accountCatalog.UpdatedAt == 0 {
-			catalog.unavailable = true
-			continue
-		}
-		for _, model := range accountCatalog.Models {
-			_, native := groups.SplitModel(model)
-			// The policy needs the account provider to enforce provider-scoped allowlists.
-			if catalog.policy.Allows(row.Provider + "/" + native) {
-				models[native] = true
-			}
-		}
-	}
-	catalog.models = make([]string, 0, len(models))
-	for model := range models {
-		catalog.models = append(catalog.models, model)
+		catalog.addAccount(row.Provider, row.ModelsSnapshot, row.ModelsRevision, seen)
 	}
 	sort.Strings(catalog.models)
 	return catalog, nil
+}
+
+// One query per relation covers every managed pool in a tenant; exclusive pool IDs never repeat across schemes.
+func loadAllocationPoolCatalogs(ctx context.Context, q *db.Queries, tenantID int64) (map[int64]*poolModelCatalog, error) {
+	policies, err := q.ListAllocationPoolPolicies(ctx, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	catalogs := make(map[int64]*poolModelCatalog, len(policies))
+	for _, row := range policies {
+		catalogs[row.GroupID] = &poolModelCatalog{policy: groups.ModelPolicy{Restricted: row.RestrictedModels}}
+	}
+	models, err := q.ListAllocationPoolModels(ctx, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	for _, row := range models {
+		catalog := catalogs[row.GroupID]
+		if catalog == nil {
+			return nil, fmt.Errorf("allocation pool %d has no policy", row.GroupID)
+		}
+		catalog.policy.Models = append(catalog.policy.Models, row.Model)
+	}
+	accounts, err := q.ListAllocationPoolCatalogs(ctx, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	seen := make(map[int64]map[string]bool, len(catalogs))
+	for _, row := range accounts {
+		catalog := catalogs[row.GroupID]
+		if catalog == nil {
+			return nil, fmt.Errorf("allocation pool %d has no policy", row.GroupID)
+		}
+		if seen[row.GroupID] == nil {
+			seen[row.GroupID] = map[string]bool{}
+		}
+		catalog.addAccount(row.Provider, row.ModelsSnapshot, row.ModelsRevision, seen[row.GroupID])
+	}
+	for _, catalog := range catalogs {
+		sort.Strings(catalog.models)
+	}
+	return catalogs, nil
 }
 
 func (s *Service) priceCoverage(catalog poolModelCatalog, revision Revision) PriceCoverage {
@@ -509,10 +598,10 @@ func (s *Service) priceCoverage(catalog poolModelCatalog, revision Revision) Pri
 
 // Priced revisions use the current catalog, then their previous saved rates when a price disappears.
 // Client-supplied rates never override catalog or previously saved prices in production.
-func (s *Service) applyPrices(ctx context.Context, q *db.Queries, groupID int64, config *Config, previous []Rate) error {
+func (s *Service) applyPrices(ctx context.Context, q *db.Queries, groupID int64, config *Config, previous []Rate) (*poolModelCatalog, error) {
 	if !pricedConfig(*config) {
 		config.Rates = []Rate{}
-		return nil
+		return nil, nil
 	}
 	if s.pricing == nil {
 		// Production injects a pricing service; explicit rates remain available to test and embedded callers.
@@ -520,13 +609,13 @@ func (s *Service) applyPrices(ctx context.Context, q *db.Queries, groupID int64,
 			config.Rates = append([]Rate(nil), previous...)
 		}
 		if len(config.Rates) > 0 {
-			return nil
+			return nil, nil
 		}
-		return ErrUnpriced
+		return nil, ErrUnpriced
 	}
 	catalog, err := loadPoolModelCatalog(ctx, q, groupID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	previousByModel := make(map[string]Rate, len(previous))
 	for _, rate := range previous {
@@ -560,9 +649,9 @@ func (s *Service) applyPrices(ctx context.Context, q *db.Queries, groupID int64,
 		}
 	}
 	if len(config.Rates) == 0 {
-		return ErrUnpriced
+		return nil, ErrUnpriced
 	}
-	return nil
+	return &catalog, nil
 }
 func Cost(r Rate, input, output, cached int64) (int64, error) {
 	if input < 0 || output < 0 || cached < 0 || cached > input || input > 1_000_000_000 || output > 1_000_000_000 {

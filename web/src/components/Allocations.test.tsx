@@ -235,6 +235,24 @@ it('distinguishes a missing catalog price from a model absent in the saved revis
   expect(screen.getByText(/Saved prices are retained/)).toBeTruthy()
 })
 
+it('uses the saved revision date when warning about scheduled price coverage', () => {
+  render(
+    <AllocationPriceWarning
+      coverage={{ uncovered_models: ['synthetic-scheduled'] }}
+      effectiveAt={1_893_456_000}
+      timing="scheduled"
+    />,
+  )
+  expect(
+    screen.getByText(/This saved version is scheduled to take effect/)
+      .textContent,
+  ).toContain('2030')
+  expect(
+    screen.getByText(/will remain blocked after this version takes effect/),
+  ).toBeTruthy()
+  expect(screen.queryByText(/If saved now/)).toBeNull()
+})
+
 it('adds custom hour and day windows with one personal override', async () => {
   const user = userEvent.setup()
   const submit = mountModelPrices('synthetic-basic', [

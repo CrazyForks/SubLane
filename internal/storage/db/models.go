@@ -76,6 +76,11 @@ type AuditEvent struct {
 	CreatedAt  int64
 }
 
+type GroupModel struct {
+	GroupID int64
+	Model   string
+}
+
 type Proxy struct {
 	ID         string
 	TenantID   int64

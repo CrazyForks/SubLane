@@ -256,7 +256,8 @@ export function Allocations() {
                   <AllocationPriceWarning
                     coverage={s.next.price_coverage}
                     label={t('allocationScheduledPricing')}
-                    effectiveAt={s.edit_effective_at}
+                    effectiveAt={s.next.effective_at}
+                    timing="scheduled"
                   />
                 )}
               </div>

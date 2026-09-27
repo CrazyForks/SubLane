@@ -669,6 +669,71 @@ func TestPriceCoverageRefreshesWithoutSavingAndIsNotPersisted(t *testing.T) {
 	}
 }
 
+func TestAllocationPoolCatalogsBatchRespectsPoliciesAndTenant(t *testing.T) {
+	_, conn, member, firstAccount := fixture(t)
+	ctx := context.Background()
+	if _, err := conn.Exec(`UPDATE accounts SET models_snapshot = ? WHERE id = ?`,
+		`{"models":["synthetic-one","synthetic-hidden"],"updated_at":1,"source":"synthetic"}`, firstAccount); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Exec(`UPDATE account_groups SET restricted_models=1 WHERE id=2;
+		INSERT INTO group_models(group_id,model) VALUES(2,'synthetic-one');
+		INSERT INTO accounts(id,provider,name,account_id,status,credential,created_at,updated_at,models_snapshot)
+		VALUES('synthetic-second-account','codex','Synthetic second','synthetic-second-subject','ready',x'01',1,1,
+		'{"models":["synthetic-two"],"updated_at":1,"source":"synthetic"}')`); err != nil {
+		t.Fatal(err)
+	}
+	secondPool, err := groups.New(conn).Save(ctx, 0, groups.Input{Name: "Synthetic second pool", Enabled: true, AccountIDs: []string{"synthetic-second-account"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := groups.New(conn).SetMemberGroups(ctx, member, []int64{2, secondPool.ID}); err != nil {
+		t.Fatal(err)
+	}
+	manager := NewWithPricing(conn, pricing.NewStatic(map[string]pricing.Price{
+		"synthetic-one": {Input: 1_000_000, Output: 2_000_000},
+		"synthetic-two": {Input: 1_000_000, Output: 2_000_000},
+	}))
+	for _, poolID := range []int64{2, secondPool.ID} {
+		if _, err := manager.SaveScheme(ctx, 0, SchemeInput{Name: fmt.Sprintf("Synthetic pool %d", poolID), GroupID: poolID, Enabled: true, Config: Config{
+			Mode: "amount", Period: "day", Members: []Share{{UserID: member, Limit: 1_000_000}},
+		}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := conn.Exec(`INSERT INTO users(id,username,role,password_hash,enabled,created_at)
+		VALUES(3,'synthetic-foreign-owner','member','synthetic-hash',1,1);
+		INSERT INTO tenants(id,name,owner_user_id,created_at) VALUES(2,'Synthetic foreign workspace',3,1);
+		INSERT INTO memberships(tenant_id,user_id,role,created_at) VALUES(2,3,'owner',1);
+		INSERT INTO accounts(id,tenant_id,provider,name,account_id,status,credential,created_at,updated_at)
+		VALUES('synthetic-foreign-account',2,'codex','Synthetic foreign account','synthetic-foreign-subject','ready',x'01',1,1)`); err != nil {
+		t.Fatal(err)
+	}
+	foreignPool, err := groups.NewForTenant(conn, 2).Save(ctx, 0, groups.Input{Name: "Synthetic foreign pool", Enabled: true, AccountIDs: []string{"synthetic-foreign-account"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewForTenant(conn, 2).SaveScheme(ctx, 0, SchemeInput{Name: "Synthetic foreign", GroupID: foreignPool.ID, Enabled: true, Config: Config{
+		Mode: "tokens", Period: "day", Members: []Share{{UserID: 3, Limit: 100}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	catalogs, err := loadAllocationPoolCatalogs(ctx, db.New(conn), 1)
+	if err != nil || len(catalogs) != 2 {
+		t.Fatal("batch catalogs crossed tenant boundary or omitted a pool", catalogs, err)
+	}
+	if !catalogs[2].policy.Restricted || len(catalogs[2].models) != 1 || catalogs[2].models[0] != "synthetic-one" {
+		t.Fatal("restricted pool policy not applied", catalogs[2])
+	}
+	if len(catalogs[secondPool.ID].models) != 1 || catalogs[secondPool.ID].models[0] != "synthetic-two" {
+		t.Fatal("models crossed pool boundary", catalogs[secondPool.ID])
+	}
+	listed, err := manager.Schemes(ctx)
+	if err != nil || len(listed) != 2 || listed[0].GroupID != 2 || listed[1].GroupID != secondPool.ID {
+		t.Fatal("batch-priced allowance list is incorrect", listed, err)
+	}
+}
+
 func TestNewlyPricedModelStillNeedsARevision(t *testing.T) {
 	_, conn, user, account := fixture(t)
 	ctx := context.Background()

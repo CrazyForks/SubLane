@@ -6,10 +6,12 @@ export function AllocationPriceWarning({
   coverage,
   label,
   effectiveAt,
+  timing = 'on-save',
 }: {
   coverage?: PriceCoverage
   label?: string
   effectiveAt?: number
+  timing?: 'on-save' | 'scheduled'
 }) {
   const { t, i18n } = useTranslation()
   const timeZone = useTimeZone()
@@ -40,12 +42,22 @@ export function AllocationPriceWarning({
       )}
       {uncovered.length > 0 && (
         <p>
-          {t('allocationUncoveredModels', {
-            count: uncovered.length,
-            models: names(uncovered),
-          })}{' '}
+          {t(
+            timing === 'scheduled'
+              ? 'allocationUncoveredModelsScheduled'
+              : 'allocationUncoveredModels',
+            {
+              count: uncovered.length,
+              models: names(uncovered),
+            },
+          )}{' '}
           {effectiveDate &&
-            t('allocationUncoveredModelsTiming', { date: effectiveDate })}
+            t(
+              timing === 'scheduled'
+                ? 'allocationUncoveredModelsScheduledTiming'
+                : 'allocationUncoveredModelsTiming',
+              { date: effectiveDate },
+            )}
         </p>
       )}
       {coverage?.catalog_unavailable && (

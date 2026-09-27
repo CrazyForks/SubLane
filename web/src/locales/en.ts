@@ -121,8 +121,12 @@ export const en = {
     'Saved model prices are in use because current catalog prices are missing ({{count}}): {{models}}. Refresh the price catalog to update future revisions.',
   allocationUncoveredModels:
     'Supported models absent from this rule’s saved prices ({{count}}): {{models}}. Save the allowance to include its price once available; requests remain blocked until that revision takes effect.',
+  allocationUncoveredModelsScheduled:
+    'Supported models without prices in the saved upcoming version ({{count}}): {{models}}. Save a corrected version before it takes effect; requests to these models will remain blocked after this version takes effect.',
   allocationUncoveredModelsTiming:
     'If saved now, this change is expected to take effect on {{date}}.',
+  allocationUncoveredModelsScheduledTiming:
+    'This saved version is scheduled to take effect on {{date}}.',
   allocationCatalogUnavailable:
     'Some account model catalogs are unavailable. Saved prices are retained when available; refresh account models to update coverage.',
   allocationCurrentPricing: 'Current price coverage',

@@ -116,7 +116,11 @@ export const zh: Record<keyof typeof en, string> = {
     '{{count}} 个模型缺少当前目录价格（{{models}}），现正沿用规则已保存的价格。刷新价格目录后，后续规则版本可使用新价格。',
   allocationUncoveredModels:
     '{{count}} 个可用模型尚未进入本规则的价格快照（{{models}}）。价格可用后需重新保存规则；在新版本生效前，这些模型的请求仍会被拒绝。',
+  allocationUncoveredModelsScheduled:
+    '已保存的待生效版本仍缺少 {{count}} 个可用模型的价格（{{models}}）。请在它生效前保存修正版本；否则该版本生效后，这些模型的请求仍会被拒绝。',
   allocationUncoveredModelsTiming: '若现在保存，修改预计于 {{date}} 生效。',
+  allocationUncoveredModelsScheduledTiming:
+    '此已保存的版本定于 {{date}} 生效。',
   allocationCatalogUnavailable:
     '部分账号的模型目录暂不可用。有历史价格时会保留；请刷新账号模型以更新覆盖范围。',
   allocationCurrentPricing: '当前版本的价格覆盖',
