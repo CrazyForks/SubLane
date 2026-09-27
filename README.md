@@ -37,15 +37,15 @@ SubLane brings AI subscriptions into one gateway with isolated workspaces for di
 
 ## Quick start
 
-With Docker, Compose, curl and jq installed, run:
+Run the guided installer with curl and a checksum utility. Choose Docker Compose or the published Linux binary, then choose no proxy, Caddy, or Nginx:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/murongg/SubLane/main/scripts/install.sh | bash
 ```
 
-Open http://127.0.0.1:8080, create the administrator, and name your first workspace in the guided setup. Connect a subscription, add it to an account pool, then create a personal key. Follow [First request](https://sublane.dev/docs/quickstart) to complete the connection; additional workspaces and usage limits can wait until you need them.
+Docker mode requires Docker Compose; binary mode requires Linux and a working systemd user manager. In a non-interactive shell, the installer retains the previous Docker-without-proxy default. Without a public domain, generated proxy configurations listen on local HTTP only. Open the URL printed by the installer, create the administrator, and name your first workspace in the guided setup. Connect a subscription, add it to an account pool, then create a personal key. Follow [First request](https://sublane.dev/docs/quickstart) to complete the connection; additional workspaces and usage limits can wait until you need them.
 
-The script installs the latest stable release, or the newest prerelease if no stable release exists, in `./sublane`. Data stays in a Docker volume; existing directories are left unchanged. For options, manual Compose deployment, HTTPS and upgrades, see the [deployment guide](https://sublane.dev/docs/deployment).
+The script installs the latest stable release, or the newest prerelease if no stable release exists, in `./sublane`. Docker mode uses a named volume; binary mode uses a private data directory and systemd user service. Existing directories are left unchanged. For options, generated proxy files, HTTPS and upgrades, see the [deployment guide](https://sublane.dev/docs/deployment).
 
 ## Development
 

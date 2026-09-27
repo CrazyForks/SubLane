@@ -25,6 +25,15 @@ function fixture(t, mode = "", api = {}) {
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const bin = join(root, "bin");
   mkdirSync(bin);
+  const archiveRoot = join(root, "archive");
+  mkdirSync(archiveRoot);
+  writeFileSync(join(archiveRoot, "sublane"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+  writeFileSync(join(archiveRoot, "LICENSE"), "Synthetic license\n");
+  const archiveName = "sublane_1.2.3_linux_amd64.tar.gz";
+  const archivePath = join(root, archiveName);
+  const packed = spawnSync("tar", ["-czf", archivePath, "-C", archiveRoot, "sublane", "LICENSE"]);
+  assert.equal(packed.status, 0, packed.stderr?.toString());
+  const archiveChecksum = createHash("sha256").update(readFileSync(archivePath)).digest("hex");
   const mock = `#!${process.execPath}
 const fs = require('node:fs');
 const path = require('node:path');
@@ -34,6 +43,11 @@ const mode = process.env.INSTALL_TEST_MODE;
 fs.appendFileSync(process.env.INSTALL_TEST_LOG, JSON.stringify({command, args, image: process.env.SUBLANE_IMAGE, port: process.env.SUBLANE_PORT}) + '\\n');
 if (command === 'curl') {
   if (mode === 'download-failure') process.exit(22);
+  if (args.some(value => value.endsWith('/readyz'))) {
+    if (mode === 'unhealthy-binary') process.exit(22);
+    process.stdout.write('{"status":"ready"}');
+    process.exit(0);
+  }
   const url = args.find(value => value.startsWith('https://'));
   const output = args[args.indexOf('--output') + 1];
   if (url.startsWith('https://api.github.com/')) {
@@ -48,17 +62,27 @@ if (command === 'curl') {
     process.stdout.write(String(status));
     process.exit(0);
   }
-  const body = url.endsWith('/SHA256SUMS')
-    ? (mode === 'bad-checksum' ? '0'.repeat(64) : ${JSON.stringify(checksum)}) + '  docker.compose.yaml\\n'
-    : ${JSON.stringify(compose)};
-  fs.writeFileSync(output, body);
+  if (url.endsWith('.tar.gz')) fs.copyFileSync(process.env.INSTALL_TEST_ARCHIVE, output);
+  else {
+    const body = url.endsWith('/SHA256SUMS')
+      ? (mode === 'bad-checksum' ? '0'.repeat(64) : ${JSON.stringify(checksum)}) + '  docker.compose.yaml\\n'
+        + (mode === 'bad-checksum' || mode === 'bad-binary-checksum' ? '0'.repeat(64) : process.env.INSTALL_TEST_ARCHIVE_CHECKSUM)
+        + '  ' + process.env.INSTALL_TEST_ARCHIVE_NAME + '\\n'
+      : ${JSON.stringify(compose)};
+    fs.writeFileSync(output, body);
+  }
 } else if (command === 'docker') {
   if (args[0] === 'info' && mode === 'no-engine') process.exit(1);
   if (args.includes('pull') && mode === 'pull-failure') process.exit(1);
   if (args.includes('up') && mode === 'unhealthy') process.exit(1);
+} else if (command === 'uname') {
+  process.stdout.write(args[0] === '-s' ? 'Linux\\n' : 'x86_64\\n');
+} else if (command === 'systemctl') {
+  if (mode === 'systemd-failure' && args.includes('enable')) process.exit(1);
+  if (mode === 'inactive-binary' && args.includes('is-active')) process.exit(1);
 }
 `;
-  for (const name of ["curl", "docker"])
+  for (const name of ["curl", "docker", "uname", "systemctl"])
     writeFileSync(join(bin, name), mock, { mode: 0o755 });
   const log = join(root, "commands.jsonl");
   return {
@@ -70,6 +94,9 @@ if (command === 'curl') {
       INSTALL_TEST_LOG: log,
       INSTALL_TEST_MODE: mode,
       INSTALL_TEST_API: JSON.stringify(api),
+      INSTALL_TEST_ARCHIVE: archivePath,
+      INSTALL_TEST_ARCHIVE_CHECKSUM: archiveChecksum,
+      INSTALL_TEST_ARCHIVE_NAME: archiveName,
     },
     calls: () =>
       existsSync(log)
@@ -137,6 +164,108 @@ test("supports piped execution, explicit versions, paths with spaces and custom 
   );
 });
 
+test("generates a Caddy configuration and external origin for a Docker install", (t) => {
+  const f = fixture(t);
+  const result = install(f, [
+    "--version", "1.2.3", "--runtime", "docker", "--proxy", "caddy",
+    "--domain", "gateway.example.test", "--port", "18080",
+  ]);
+  assert.equal(result.status, 0, result.stderr);
+  const env = readFileSync(join(f.target, ".env"), "utf8");
+  assert.match(env, /^SUBLANE_PUBLIC_URL=https:\/\/gateway\.example\.test$/m);
+  assert.match(readFileSync(join(f.target, "Caddyfile"), "utf8"), /reverse_proxy 127\.0\.0\.1:18080/);
+  assert.equal(existsSync(join(f.target, "nginx.conf")), false);
+});
+
+test("generates an Nginx configuration with forwarding and streaming headers", (t) => {
+  const f = fixture(t);
+  const result = install(f, [
+    "--version", "1.2.3", "--runtime", "docker", "--proxy", "nginx",
+    "--domain", "gateway.example.test",
+  ]);
+  assert.equal(result.status, 0, result.stderr);
+  const config = readFileSync(join(f.target, "nginx.conf"), "utf8");
+  assert.match(config, /server_name gateway\.example\.test;/);
+  assert.match(config, /proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;/);
+  assert.match(config, /proxy_set_header Upgrade \$http_upgrade;/);
+  assert.match(config, /proxy_buffering off;/);
+  assert.match(config, /proxy_pass http:\/\/127\.0\.0\.1:8080;/);
+});
+
+test("allows Caddy and Nginx without a domain using local HTTP only", (t) => {
+  for (const proxy of ["caddy", "nginx"]) {
+    const f = fixture(t);
+    const result = install(f, ["--version", "1.2.3", "--proxy", proxy]);
+    assert.equal(result.status, 0, result.stderr);
+    const env = readFileSync(join(f.target, ".env"), "utf8");
+    assert.match(env, /^SUBLANE_PUBLIC_URL=$/m);
+    const config = readFileSync(join(f.target, proxy === "caddy" ? "Caddyfile" : "nginx.conf"), "utf8");
+    assert.match(config, /127\.0\.0\.1:80/);
+    assert.doesNotMatch(config, /listen 443|https:\/\/gateway/);
+  }
+});
+
+test("installs a verified binary and enables its systemd user service without Docker", (t) => {
+  const f = fixture(t);
+  const result = install(f, [
+    "--version", "1.2.3", "--runtime", "binary", "--proxy", "caddy",
+    "--domain", "gateway.example.test",
+  ]);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(existsSync(join(f.target, "sublane")), true);
+  assert.equal(existsSync(join(f.target, "start.sh")), true);
+  assert.match(readFileSync(join(f.target, "sublane.env"), "utf8"), /SUBLANE_TRUSTED_PROXIES=127\.0\.0\.1\/32/);
+  assert.match(readFileSync(join(f.target, "Caddyfile"), "utf8"), /reverse_proxy 127\.0\.0\.1:8080/);
+  assert.ok(f.calls().some(call => call.command === "systemctl" && call.args.includes("enable") && call.args.includes("--now")));
+  assert.equal(f.calls().some(call => call.command === "docker"), false);
+});
+
+test("binary service unit quotes an installation path with spaces", (t) => {
+  const f = fixture(t);
+  const target = join(f.root, "team gateway");
+  const result = install(f, ["--version", "1.2.3", "--runtime", "binary", "--dir", target]);
+  assert.equal(result.status, 0, result.stderr);
+  const unitName = f.calls().find(call => call.command === "systemctl" && call.args.includes("link"))?.args.at(-1);
+  assert.ok(unitName);
+  const unit = readFileSync(unitName, "utf8");
+  assert.match(unit, /ExecStart=\/bin\/bash "[^"]*team gateway\/start\.sh"/);
+});
+
+test("a systemd activation failure retains verified binary files for inspection", (t) => {
+  const f = fixture(t, "systemd-failure");
+  const result = install(f, ["--version", "1.2.3", "--runtime", "binary"]);
+  assert.notEqual(result.status, 0);
+  assert.equal(existsSync(join(f.target, "sublane")), true);
+  assert.match(result.stderr, /retained|preserved/i);
+});
+
+test("a corrupt binary archive is rejected before systemd is changed", (t) => {
+  const f = fixture(t, "bad-binary-checksum");
+  const result = install(f, ["--version", "1.2.3", "--runtime", "binary"]);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /checksum mismatch/);
+  assert.equal(existsSync(f.target), false);
+  assert.equal(f.calls().some(call => call.command === "systemctl" && call.args.includes("link")), false);
+});
+
+test("a binary service that never becomes ready retains its files and reports failure", (t) => {
+  const f = fixture(t, "unhealthy-binary");
+  const result = install(f, [
+    "--version", "1.2.3", "--runtime", "binary", "--wait-timeout", "1",
+  ]);
+  assert.notEqual(result.status, 0);
+  assert.equal(existsSync(join(f.target, "sublane")), true);
+  assert.match(result.stderr, /ready|healthy/i);
+  assert.ok(f.calls().some(call => call.command === "systemctl" && call.args.includes("disable") && call.args.includes("--now")));
+});
+
+test("binary readiness cannot be satisfied by another process on the port", (t) => {
+  const f = fixture(t, "inactive-binary");
+  const result = install(f, ["--version", "1.2.3", "--runtime", "binary", "--wait-timeout", "1"]);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /service|ready/i);
+});
+
 test("rejects invalid arguments before downloading or starting containers", (t) => {
   for (const args of [
     ["--version", "1.2.3;touch unexpected"],
@@ -148,6 +277,9 @@ test("rejects invalid arguments before downloading or starting containers", (t) 
     ["--port", "65536"],
     ["--port", "8080\nOTHER=value"],
     ["--dir", "line\nbreak"],
+    ["--proxy", "caddy", "--domain", "gateway..example.test"],
+    ["--proxy", "nginx", "--domain", "gateway.example.test."],
+    ["--proxy", "caddy", "--trusted-proxies", "127.0.0.1"],
     ["--version"],
     ["--force"],
   ]) {
