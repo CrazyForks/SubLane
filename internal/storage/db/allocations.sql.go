@@ -475,6 +475,115 @@ func (q *Queries) ListAllocationPending(ctx context.Context, arg ListAllocationP
 	return items, nil
 }
 
+const listAllocationPoolCatalogs = `-- name: ListAllocationPoolCatalogs :many
+SELECT ga.group_id,a.id,a.provider,a.models_snapshot,a.models_revision
+FROM group_accounts ga JOIN allocation_schemes s ON s.group_id=ga.group_id
+JOIN account_groups g ON g.id=s.group_id JOIN accounts a ON a.id=ga.account_id
+WHERE g.tenant_id=?1 AND a.enabled=1 AND a.status!='reauth_required'
+ORDER BY ga.group_id,a.id
+`
+
+type ListAllocationPoolCatalogsRow struct {
+	GroupID        int64
+	ID             string
+	Provider       string
+	ModelsSnapshot []byte
+	ModelsRevision int64
+}
+
+func (q *Queries) ListAllocationPoolCatalogs(ctx context.Context, tenantID int64) ([]ListAllocationPoolCatalogsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listAllocationPoolCatalogs, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAllocationPoolCatalogsRow{}
+	for rows.Next() {
+		var i ListAllocationPoolCatalogsRow
+		if err := rows.Scan(
+			&i.GroupID,
+			&i.ID,
+			&i.Provider,
+			&i.ModelsSnapshot,
+			&i.ModelsRevision,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAllocationPoolModels = `-- name: ListAllocationPoolModels :many
+SELECT gm.group_id,gm.model FROM group_models gm
+JOIN allocation_schemes s ON s.group_id=gm.group_id
+JOIN account_groups g ON g.id=s.group_id
+WHERE g.tenant_id=?1 ORDER BY gm.group_id,gm.model
+`
+
+func (q *Queries) ListAllocationPoolModels(ctx context.Context, tenantID int64) ([]GroupModel, error) {
+	rows, err := q.db.QueryContext(ctx, listAllocationPoolModels, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GroupModel{}
+	for rows.Next() {
+		var i GroupModel
+		if err := rows.Scan(&i.GroupID, &i.Model); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAllocationPoolPolicies = `-- name: ListAllocationPoolPolicies :many
+SELECT g.id AS group_id,g.restricted_models
+FROM allocation_schemes s JOIN account_groups g ON g.id=s.group_id
+WHERE g.tenant_id=?1 ORDER BY g.id
+`
+
+type ListAllocationPoolPoliciesRow struct {
+	GroupID          int64
+	RestrictedModels bool
+}
+
+func (q *Queries) ListAllocationPoolPolicies(ctx context.Context, tenantID int64) ([]ListAllocationPoolPoliciesRow, error) {
+	rows, err := q.db.QueryContext(ctx, listAllocationPoolPolicies, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAllocationPoolPoliciesRow{}
+	for rows.Next() {
+		var i ListAllocationPoolPoliciesRow
+		if err := rows.Scan(&i.GroupID, &i.RestrictedModels); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAllocationSchemes = `-- name: ListAllocationSchemes :many
 SELECT s.id, s.name, s.group_id, s.enabled, s.created_at,g.name AS group_name FROM allocation_schemes s
 JOIN account_groups g ON g.id=s.group_id WHERE g.tenant_id=?1 ORDER BY s.id

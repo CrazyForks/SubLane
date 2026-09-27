@@ -1,6 +1,25 @@
 -- name: ListAllocationSchemes :many
 SELECT s.*,g.name AS group_name FROM allocation_schemes s
 JOIN account_groups g ON g.id=s.group_id WHERE g.tenant_id=sqlc.arg(tenant_id) ORDER BY s.id;
+
+-- name: ListAllocationPoolPolicies :many
+SELECT g.id AS group_id,g.restricted_models
+FROM allocation_schemes s JOIN account_groups g ON g.id=s.group_id
+WHERE g.tenant_id=sqlc.arg(tenant_id) ORDER BY g.id;
+
+-- name: ListAllocationPoolModels :many
+SELECT gm.group_id,gm.model FROM group_models gm
+JOIN allocation_schemes s ON s.group_id=gm.group_id
+JOIN account_groups g ON g.id=s.group_id
+WHERE g.tenant_id=sqlc.arg(tenant_id) ORDER BY gm.group_id,gm.model;
+
+-- name: ListAllocationPoolCatalogs :many
+SELECT ga.group_id,a.id,a.provider,a.models_snapshot,a.models_revision
+FROM group_accounts ga JOIN allocation_schemes s ON s.group_id=ga.group_id
+JOIN account_groups g ON g.id=s.group_id JOIN accounts a ON a.id=ga.account_id
+WHERE g.tenant_id=sqlc.arg(tenant_id) AND a.enabled=1 AND a.status!='reauth_required'
+ORDER BY ga.group_id,a.id;
+
 -- name: GetAllocationScheme :one
 SELECT s.*,g.name AS group_name FROM allocation_schemes s
 JOIN account_groups g ON g.id=s.group_id WHERE s.id=?;

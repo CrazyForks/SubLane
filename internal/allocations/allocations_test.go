@@ -3,9 +3,11 @@ package allocations
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -488,24 +490,403 @@ func TestTeamsSchemesAndExclusiveCapacity(t *testing.T) {
 	input.Config.Total = 0
 	input.Config.Period = "month"
 	input.Config.Members[0].Limit = 1000000
-	if _, err = s.SaveScheme(ctx, scheme.ID, input); !errors.Is(err, ErrInput) {
+	if _, err = s.SaveScheme(ctx, scheme.ID, input); !errors.Is(err, ErrUnpriced) {
 		t.Fatal("unpriced amount scheme", err)
 	}
 }
 
 func TestSchemeCopiesAutomaticPriceIntoRevision(t *testing.T) {
-	_, conn, user, _ := fixture(t)
+	_, conn, user, account := fixture(t)
 	ctx := context.Background()
+	if _, err := conn.Exec(`UPDATE accounts SET models_snapshot = ? WHERE id = ?`,
+		`{"models":["gpt-5.1-codex"],"updated_at":1,"source":"synthetic"}`, account); err != nil {
+		t.Fatal(err)
+	}
 	manager := NewWithPricing(conn, pricing.NewStatic(map[string]pricing.Price{
 		"gpt-5.1-codex": {Input: 1250000, Cached: 125000, Output: 10000000},
 	}))
-	scheme, err := manager.SaveScheme(ctx, 0, SchemeInput{Name: "Codex shared plan", GroupID: 2, Enabled: true, Config: Config{Mode: "amount", Period: "day", Members: []Share{{UserID: user, Limit: 100}}, Rates: []Rate{{Model: "gpt-5.1-codex"}}}})
+	scheme, err := manager.SaveScheme(ctx, 0, SchemeInput{Name: "Codex shared plan", GroupID: 2, Enabled: true, Config: Config{Mode: "amount", Period: "day", Members: []Share{{UserID: user, Limit: 100}}}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	rate := scheme.Config.Rates[0]
 	if rate.Input != 1250000 || rate.Cached != 125000 || rate.Output != 10000000 {
 		t.Fatalf("automatic price not snapshotted: %+v", rate)
+	}
+}
+
+func TestAutomaticPricesFollowGroupAllowlistAndIgnoreSubmittedRates(t *testing.T) {
+	_, conn, user, account := fixture(t)
+	ctx := context.Background()
+	if _, err := conn.Exec(`UPDATE accounts SET models_snapshot = ? WHERE id = ?`,
+		`{"models":["synthetic-priced","synthetic-unpriced"],"updated_at":1,"source":"synthetic"}`, account); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Exec(`UPDATE account_groups SET restricted_models=1 WHERE id=2`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Exec(`INSERT INTO group_models(group_id,model) VALUES(2,'synthetic-priced')`); err != nil {
+		t.Fatal(err)
+	}
+	manager := NewWithPricing(conn, pricing.NewStatic(map[string]pricing.Price{
+		"synthetic-priced": {Input: 1_000_000, Cached: 100_000, Output: 2_000_000},
+	}))
+	scheme, err := manager.SaveScheme(ctx, 0, SchemeInput{Name: "Synthetic catalog pricing", GroupID: 2, Enabled: true, Config: Config{
+		Mode: "windows", Period: "durations", Windows: []WindowCondition{{DurationSeconds: 3600, Limit: 100}},
+		Members: []Share{{UserID: user}}, Rates: []Rate{{Model: "synthetic-priced", Input: 999_999_999, Output: 999_999_999}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(scheme.Config.Rates) != 1 || scheme.Config.Rates[0].Model != "synthetic-priced" || scheme.Config.Rates[0].Input != 1_000_000 || scheme.Config.Rates[0].Output != 2_000_000 {
+		t.Fatal("group catalog prices were not snapshotted", scheme.Config.Rates)
+	}
+}
+
+func TestAutomaticPricesSavePricedModelsAndWarnAboutMissingOnes(t *testing.T) {
+	_, conn, user, account := fixture(t)
+	ctx := context.Background()
+	if _, err := conn.Exec(`UPDATE accounts SET models_snapshot = ? WHERE id = ?`,
+		`{"models":["synthetic-priced","synthetic-new"],"updated_at":1,"source":"synthetic"}`, account); err != nil {
+		t.Fatal(err)
+	}
+	manager := NewWithPricing(conn, pricing.NewStatic(map[string]pricing.Price{
+		"synthetic-priced": {Input: 1_000_000, Output: 2_000_000},
+	}))
+	scheme, err := manager.SaveScheme(ctx, 0, SchemeInput{Name: "Synthetic partial pricing", GroupID: 2, Enabled: true, Config: Config{
+		Mode: "amount", Period: "day", Members: []Share{{UserID: user, Limit: 1_000_000}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(scheme.Config.Rates) != 1 || scheme.Config.Rates[0].Model != "synthetic-priced" {
+		t.Fatal("priced model was not saved", scheme.Config.Rates)
+	}
+	if len(scheme.PriceCoverage.UncoveredModels) != 1 || scheme.PriceCoverage.UncoveredModels[0] != "synthetic-new" {
+		t.Fatal("uncovered model was not returned", scheme.PriceCoverage)
+	}
+	if _, err := rateFor(scheme.Revision, "synthetic-new"); !errors.Is(err, ErrUnpriced) {
+		t.Fatal("unpriced request should remain blocked", err)
+	}
+}
+
+func TestAutomaticPricesReuseSavedRateWhenCatalogPriceDisappears(t *testing.T) {
+	_, conn, user, account := fixture(t)
+	ctx := context.Background()
+	if _, err := conn.Exec(`UPDATE accounts SET models_snapshot = ? WHERE id = ?`,
+		`{"models":["synthetic-priced"],"updated_at":1,"source":"synthetic"}`, account); err != nil {
+		t.Fatal(err)
+	}
+	manager := NewWithPricing(conn, pricing.NewStatic(map[string]pricing.Price{
+		"synthetic-priced": {Input: 1_000_000, Output: 2_000_000},
+	}))
+	input := SchemeInput{Name: "Synthetic initial", GroupID: 2, Enabled: true, Config: Config{
+		Mode: "amount", Period: "day", Members: []Share{{UserID: user, Limit: 1_000_000}},
+	}}
+	scheme, err := manager.SaveScheme(ctx, 0, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager.pricing = pricing.NewStatic(map[string]pricing.Price{})
+	input.Name = "Synthetic renamed"
+	updated, err := manager.SaveScheme(ctx, scheme.ID, input)
+	if err != nil {
+		t.Fatal("existing allowance should remain editable", err)
+	}
+	if updated.Next == nil || len(updated.Next.Config.Rates) != 1 || updated.Next.Config.Rates[0] != scheme.Config.Rates[0] {
+		t.Fatal("saved price was not retained", updated.Next)
+	}
+	if len(updated.Next.PriceCoverage.MissingCatalogPrices) != 1 || updated.Next.PriceCoverage.MissingCatalogPrices[0] != "synthetic-priced" {
+		t.Fatal("missing current catalog price was not reported", updated.Next.PriceCoverage)
+	}
+}
+
+func TestAutomaticPricesKeepSavedRateWhenAccountCatalogIsUnavailable(t *testing.T) {
+	_, conn, user, account := fixture(t)
+	ctx := context.Background()
+	if _, err := conn.Exec(`UPDATE accounts SET models_snapshot = ? WHERE id = ?`,
+		`{"models":["synthetic-priced"],"updated_at":1,"source":"synthetic"}`, account); err != nil {
+		t.Fatal(err)
+	}
+	manager := NewWithPricing(conn, pricing.NewStatic(map[string]pricing.Price{
+		"synthetic-priced": {Input: 1_000_000, Output: 2_000_000},
+	}))
+	input := SchemeInput{Name: "Synthetic initial", GroupID: 2, Enabled: true, Config: Config{
+		Mode: "amount", Period: "day", Members: []Share{{UserID: user, Limit: 1_000_000}},
+	}}
+	scheme, err := manager.SaveScheme(ctx, 0, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Exec(`UPDATE accounts SET models_snapshot = NULL WHERE id = ?`, account); err != nil {
+		t.Fatal(err)
+	}
+	manager.pricing = pricing.NewStatic(map[string]pricing.Price{})
+	input.Name = "Synthetic renamed"
+	updated, err := manager.SaveScheme(ctx, scheme.ID, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Next == nil || !updated.Next.PriceCoverage.CatalogUnavailable || len(updated.Next.Config.Rates) != 1 {
+		t.Fatal("unavailable catalog should retain usable rate and return warning", updated.Next)
+	}
+}
+
+func TestPriceCoverageRefreshesWithoutSavingAndIsNotPersisted(t *testing.T) {
+	_, conn, user, account := fixture(t)
+	ctx := context.Background()
+	if _, err := conn.Exec(`UPDATE accounts SET models_snapshot = ? WHERE id = ?`,
+		`{"models":["synthetic-priced"],"updated_at":1,"source":"synthetic"}`, account); err != nil {
+		t.Fatal(err)
+	}
+	manager := NewWithPricing(conn, pricing.NewStatic(map[string]pricing.Price{
+		"synthetic-priced": {Input: 1_000_000, Output: 2_000_000},
+	}))
+	scheme, err := manager.SaveScheme(ctx, 0, SchemeInput{Name: "Synthetic live warning", GroupID: 2, Enabled: true, Config: Config{
+		Mode: "amount", Period: "day", Members: []Share{{UserID: user, Limit: 1_000_000}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager.pricing = pricing.NewStatic(map[string]pricing.Price{})
+	listed, err := manager.Schemes(ctx)
+	if err != nil || len(listed) != 1 || len(listed[0].PriceCoverage.MissingCatalogPrices) != 1 {
+		t.Fatal("current missing price did not appear without saving", listed, err)
+	}
+	manager.pricing = pricing.NewStatic(map[string]pricing.Price{
+		"synthetic-priced": {Input: 1_000_000, Output: 2_000_000},
+	})
+	listed, err = manager.Schemes(ctx)
+	if err != nil || len(listed[0].PriceCoverage.MissingCatalogPrices) != 0 {
+		t.Fatal("resolved catalog warning did not clear without saving", listed, err)
+	}
+	var raw string
+	if err := conn.QueryRow(`SELECT config FROM allocation_revisions WHERE scheme_id = ?`, scheme.ID).Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(raw, "price_coverage") || strings.Contains(raw, "missing_price_models") || strings.Contains(raw, "catalog_unavailable") {
+		t.Fatal("transient price warning was persisted", raw)
+	}
+}
+
+func TestAllocationPoolCatalogsBatchRespectsPoliciesAndTenant(t *testing.T) {
+	_, conn, member, firstAccount := fixture(t)
+	ctx := context.Background()
+	if _, err := conn.Exec(`UPDATE accounts SET models_snapshot = ? WHERE id = ?`,
+		`{"models":["synthetic-one","synthetic-hidden"],"updated_at":1,"source":"synthetic"}`, firstAccount); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Exec(`UPDATE account_groups SET restricted_models=1 WHERE id=2;
+		INSERT INTO group_models(group_id,model) VALUES(2,'synthetic-one');
+		INSERT INTO accounts(id,provider,name,account_id,status,credential,created_at,updated_at,models_snapshot)
+		VALUES('synthetic-second-account','codex','Synthetic second','synthetic-second-subject','ready',x'01',1,1,
+		'{"models":["synthetic-two"],"updated_at":1,"source":"synthetic"}')`); err != nil {
+		t.Fatal(err)
+	}
+	secondPool, err := groups.New(conn).Save(ctx, 0, groups.Input{Name: "Synthetic second pool", Enabled: true, AccountIDs: []string{"synthetic-second-account"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := groups.New(conn).SetMemberGroups(ctx, member, []int64{2, secondPool.ID}); err != nil {
+		t.Fatal(err)
+	}
+	manager := NewWithPricing(conn, pricing.NewStatic(map[string]pricing.Price{
+		"synthetic-one": {Input: 1_000_000, Output: 2_000_000},
+		"synthetic-two": {Input: 1_000_000, Output: 2_000_000},
+	}))
+	for _, poolID := range []int64{2, secondPool.ID} {
+		if _, err := manager.SaveScheme(ctx, 0, SchemeInput{Name: fmt.Sprintf("Synthetic pool %d", poolID), GroupID: poolID, Enabled: true, Config: Config{
+			Mode: "amount", Period: "day", Members: []Share{{UserID: member, Limit: 1_000_000}},
+		}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := conn.Exec(`INSERT INTO users(id,username,role,password_hash,enabled,created_at)
+		VALUES(3,'synthetic-foreign-owner','member','synthetic-hash',1,1);
+		INSERT INTO tenants(id,name,owner_user_id,created_at) VALUES(2,'Synthetic foreign workspace',3,1);
+		INSERT INTO memberships(tenant_id,user_id,role,created_at) VALUES(2,3,'owner',1);
+		INSERT INTO accounts(id,tenant_id,provider,name,account_id,status,credential,created_at,updated_at)
+		VALUES('synthetic-foreign-account',2,'codex','Synthetic foreign account','synthetic-foreign-subject','ready',x'01',1,1)`); err != nil {
+		t.Fatal(err)
+	}
+	foreignPool, err := groups.NewForTenant(conn, 2).Save(ctx, 0, groups.Input{Name: "Synthetic foreign pool", Enabled: true, AccountIDs: []string{"synthetic-foreign-account"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewForTenant(conn, 2).SaveScheme(ctx, 0, SchemeInput{Name: "Synthetic foreign", GroupID: foreignPool.ID, Enabled: true, Config: Config{
+		Mode: "tokens", Period: "day", Members: []Share{{UserID: 3, Limit: 100}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	catalogs, err := loadAllocationPoolCatalogs(ctx, db.New(conn), 1)
+	if err != nil || len(catalogs) != 2 {
+		t.Fatal("batch catalogs crossed tenant boundary or omitted a pool", catalogs, err)
+	}
+	if !catalogs[2].policy.Restricted || len(catalogs[2].models) != 1 || catalogs[2].models[0] != "synthetic-one" {
+		t.Fatal("restricted pool policy not applied", catalogs[2])
+	}
+	if len(catalogs[secondPool.ID].models) != 1 || catalogs[secondPool.ID].models[0] != "synthetic-two" {
+		t.Fatal("models crossed pool boundary", catalogs[secondPool.ID])
+	}
+	listed, err := manager.Schemes(ctx)
+	if err != nil || len(listed) != 2 || listed[0].GroupID != 2 || listed[1].GroupID != secondPool.ID {
+		t.Fatal("batch-priced allowance list is incorrect", listed, err)
+	}
+}
+
+func TestNewlyPricedModelStillNeedsARevision(t *testing.T) {
+	_, conn, user, account := fixture(t)
+	ctx := context.Background()
+	if _, err := conn.Exec(`UPDATE accounts SET models_snapshot = ? WHERE id = ?`,
+		`{"models":["synthetic-priced","synthetic-new"],"updated_at":1,"source":"synthetic"}`, account); err != nil {
+		t.Fatal(err)
+	}
+	manager := NewWithPricing(conn, pricing.NewStatic(map[string]pricing.Price{
+		"synthetic-priced": {Input: 1_000_000, Output: 2_000_000},
+	}))
+	input := SchemeInput{Name: "Synthetic coverage", GroupID: 2, Enabled: true, Config: Config{
+		Mode: "amount", Period: "day", Members: []Share{{UserID: user, Limit: 1_000_000}},
+	}}
+	scheme, err := manager.SaveScheme(ctx, 0, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager.pricing = pricing.NewStatic(map[string]pricing.Price{
+		"synthetic-priced": {Input: 1_000_000, Output: 2_000_000},
+		"synthetic-new":    {Input: 1_000_000, Output: 2_000_000},
+	})
+	listed, err := manager.Schemes(ctx)
+	if err != nil || len(listed) != 1 || len(listed[0].PriceCoverage.UncoveredModels) != 1 || len(listed[0].PriceCoverage.MissingCatalogPrices) != 0 {
+		t.Fatal("saved revision should still warn about its missing rate", listed, err)
+	}
+	input.Name = "Synthetic updated coverage"
+	updated, err := manager.SaveScheme(ctx, scheme.ID, input)
+	if err != nil || updated.Next == nil || len(updated.Next.PriceCoverage.UncoveredModels) != 0 {
+		t.Fatal("new revision should cover newly priced model", updated.Next, err)
+	}
+}
+
+func TestMissingCatalogPricePrefersScheduledRateOverCurrentRate(t *testing.T) {
+	_, conn, user, account := fixture(t)
+	ctx := context.Background()
+	if _, err := conn.Exec(`UPDATE accounts SET models_snapshot = ? WHERE id = ?`,
+		`{"models":["synthetic-priced"],"updated_at":1,"source":"synthetic"}`, account); err != nil {
+		t.Fatal(err)
+	}
+	manager := NewWithPricing(conn, pricing.NewStatic(map[string]pricing.Price{
+		"synthetic-priced": {Input: 1_000_000, Output: 2_000_000},
+	}))
+	input := SchemeInput{Name: "Synthetic first", GroupID: 2, Enabled: true, Config: Config{
+		Mode: "amount", Period: "day", Members: []Share{{UserID: user, Limit: 1_000_000}},
+	}}
+	scheme, err := manager.SaveScheme(ctx, 0, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager.pricing = pricing.NewStatic(map[string]pricing.Price{
+		"synthetic-priced": {Input: 3_000_000, Output: 4_000_000},
+	})
+	input.Name = "Synthetic second"
+	updated, err := manager.SaveScheme(ctx, scheme.ID, input)
+	if err != nil || updated.Next == nil || updated.Next.Config.Rates[0].Input != 3_000_000 {
+		t.Fatal("new catalog price was not scheduled", updated.Next, err)
+	}
+	manager.pricing = pricing.NewStatic(map[string]pricing.Price{})
+	input.Name = "Synthetic third"
+	updated, err = manager.SaveScheme(ctx, scheme.ID, input)
+	if err != nil || updated.Next == nil || updated.Next.Config.Rates[0].Input != 3_000_000 {
+		t.Fatal("older active price replaced newer scheduled price", updated.Next, err)
+	}
+}
+
+func TestNilPricingServiceAcceptsSubmittedRates(t *testing.T) {
+	manager, _, user, _ := fixture(t)
+	scheme, err := manager.SaveScheme(context.Background(), 0, SchemeInput{Name: "Synthetic direct prices", GroupID: 2, Enabled: true, Config: Config{
+		Mode: "amount", Period: "day", Members: []Share{{UserID: user, Limit: 1_000_000}},
+		Rates: []Rate{{Model: "synthetic", Input: 1_000_000, Output: 2_000_000}},
+	}})
+	if err != nil || len(scheme.Config.Rates) != 1 {
+		t.Fatal("nil pricing should retain supplied test-seam rate", scheme, err)
+	}
+}
+
+func TestEditBoundaryUsesCurrentDurationWhenDraftIsLonger(t *testing.T) {
+	manager, _, user, _ := fixture(t)
+	ctx := context.Background()
+	anchor := time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC).Unix()
+	manager.now = func() time.Time { return unix(anchor) }
+	input := SchemeInput{Name: "Synthetic short window", GroupID: 2, Enabled: true, Config: Config{
+		Mode: "windows", Period: "durations", Windows: []WindowCondition{{DurationSeconds: 5 * 3600, Limit: 1_000_000}},
+		Members: []Share{{UserID: user}}, Rates: []Rate{{Model: "synthetic", Input: 1_000_000, Output: 2_000_000}},
+	}}
+	scheme, err := manager.SaveScheme(ctx, 0, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager.now = func() time.Time { return unix(anchor + 3600) }
+	input.Config.Windows = []WindowCondition{{DurationSeconds: 30 * 86400, Limit: 1_000_000}}
+	updated, err := manager.SaveScheme(ctx, scheme.ID, input)
+	if err != nil || updated.Next == nil || updated.Next.EffectiveAt != anchor+5*3600 {
+		t.Fatal("draft duration incorrectly delayed this edit", updated.Next, err)
+	}
+}
+
+func TestLongWindowEditReportsActualEffectiveDate(t *testing.T) {
+	manager, _, user, _ := fixture(t)
+	ctx := context.Background()
+	anchor := time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC).Unix()
+	manager.now = func() time.Time { return unix(anchor) }
+	input := SchemeInput{Name: "Synthetic long window", GroupID: 2, Enabled: true, Config: Config{
+		Mode: "windows", Period: "durations", Windows: []WindowCondition{{DurationSeconds: 30 * 86400, Limit: 1_000_000}},
+		Members: []Share{{UserID: user}}, Rates: []Rate{{Model: "synthetic", Input: 1_000_000, Output: 2_000_000}},
+	}}
+	scheme, err := manager.SaveScheme(ctx, 0, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager.now = func() time.Time { return unix(anchor + 3600) }
+	listed, err := manager.Schemes(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listed) != 1 || listed[0].EditEffectiveAt != anchor+30*86400 {
+		t.Fatal("edit preview did not match longest current window", listed)
+	}
+	input.Name = "Synthetic longer name"
+	updated, err := manager.SaveScheme(ctx, scheme.ID, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Next == nil || updated.Next.EffectiveAt != listed[0].EditEffectiveAt {
+		t.Fatal("saved edit and preview disagree", updated.Next, listed[0].EditEffectiveAt)
+	}
+}
+
+func TestAutomaticPricesSupportFullPoolCatalog(t *testing.T) {
+	_, conn, user, account := fixture(t)
+	ctx := context.Background()
+	models := make([]string, 129)
+	prices := make(map[string]pricing.Price, len(models))
+	for index := range models {
+		models[index] = fmt.Sprintf("synthetic-model-%03d", index)
+		prices[models[index]] = pricing.Price{Input: 1_000_000, Output: 2_000_000}
+	}
+	snapshot, err := json.Marshal(map[string]any{"models": models, "updated_at": 1, "source": "synthetic"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Exec(`UPDATE accounts SET models_snapshot = ? WHERE id = ?`, snapshot, account); err != nil {
+		t.Fatal(err)
+	}
+	manager := NewWithPricing(conn, pricing.NewStatic(prices))
+	scheme, err := manager.SaveScheme(ctx, 0, SchemeInput{Name: "Synthetic large catalog", GroupID: 2, Enabled: true, Config: Config{
+		Mode: "amount", Period: "day", Members: []Share{{UserID: user, Limit: 1_000_000}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(scheme.Config.Rates) != len(models) {
+		t.Fatalf("want %d saved model prices, got %d", len(models), len(scheme.Config.Rates))
 	}
 }
 
@@ -707,6 +1088,331 @@ func TestUnsettledRequestCountHasAutomaticBound(t *testing.T) {
 		t.Fatal(err)
 	} else if balance := detail.Balances[0]; balance.InFlight != 4 || balance.AdmissionRoom != 700 || balance.Admission != "risk_limited" {
 		t.Fatal("balance missed the unsettled-request count cap", balance)
+	}
+}
+
+func TestWindowedAmountChecksFiveHoursAndSevenDays(t *testing.T) {
+	s, conn, user, account := fixture(t)
+	ctx := context.Background()
+	now := time.Date(2030, 4, 15, 12, 0, 0, 0, time.UTC).Unix()
+	s.now = func() time.Time { return unix(now) }
+	config := Config{Mode: "windows", Period: "durations", Windows: []WindowCondition{{DurationSeconds: 5 * 3600, Limit: 100}, {DurationSeconds: 7 * 86400, Limit: 200}}, Members: []Share{{UserID: user}}, Rates: []Rate{{Model: "synthetic", Input: 1_000_000, Output: 1_000_000}}}
+	scheme, err := s.SaveScheme(ctx, 0, SchemeInput{Name: "Synthetic dual windows", GroupID: 2, Enabled: true, Config: config})
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := db.New(conn)
+	charge := func(id string, tokens int64) {
+		t.Helper()
+		r := Request{ID: id, SchemeID: scheme.ID, UserID: user, GroupID: 2, AccountID: account, Model: "synthetic", StartedAt: now}
+		if err := Begin(ctx, q, r, now, time.UTC); err != nil {
+			t.Fatal("begin", id, err)
+		}
+		if err := Finish(ctx, q, id, Completion{Input: tokens, Known: true, Dispatched: true}, now*1000, false); err != nil {
+			t.Fatal("finish", id, err)
+		}
+	}
+	charge("synthetic-5h-first", 90)
+	if detail, err := s.Detail(ctx, scheme.ID, user); err != nil {
+		t.Fatal(err)
+	} else if len(detail.Balances) != 2 || detail.Balances[0].Mode != "amount" || detail.Balances[0].WindowKind != "duration" || detail.Balances[0].WindowSeconds != 5*3600 || detail.Balances[0].Limit != 100 || detail.Balances[0].Used != 90 || detail.Balances[0].ResetAt != now+5*3600 || detail.Balances[1].Mode != "amount" || detail.Balances[1].WindowKind != "duration" || detail.Balances[1].WindowSeconds != 7*86400 || detail.Balances[1].Limit != 200 || detail.Balances[1].Used != 90 || detail.Balances[1].ResetAt != now+7*86400 {
+		t.Fatal("dual balances do not share one settled request", detail.Balances)
+	}
+	charge("synthetic-5h-last", 10)
+	if _, err := Check(ctx, q, scheme.ID, user, 2, account, "synthetic", now, time.UTC); !errors.Is(err, ErrQuota) {
+		t.Fatal("five-hour amount limit was exceeded", err)
+	}
+	now += 5 * 3600
+	if _, err := Check(ctx, q, scheme.ID, user, 2, account, "synthetic", now, time.UTC); err != nil {
+		t.Fatal("five-hour reset did not reopen the weekly allowance", err)
+	}
+	charge("synthetic-7d-last", 100)
+	if _, err := Check(ctx, q, scheme.ID, user, 2, account, "synthetic", now, time.UTC); !errors.Is(err, ErrQuota) {
+		t.Fatal("seven-day amount limit was exceeded", err)
+	}
+	now += 7*86400 - 5*3600
+	if _, err := Check(ctx, q, scheme.ID, user, 2, account, "synthetic", now, time.UTC); err != nil {
+		t.Fatal("seven-day reset did not reopen the allowance", err)
+	}
+}
+
+func TestWindowedAmountRejectsInvalidConditionsAndOverrides(t *testing.T) {
+	s, _, user, _ := fixture(t)
+	ctx := context.Background()
+	base := Config{Mode: "windows", Period: "durations", Windows: []WindowCondition{{DurationSeconds: 5 * 3600, Limit: 100}, {DurationSeconds: 7 * 86400, Limit: 200}}, Members: []Share{{UserID: user}}, Rates: []Rate{{Model: "synthetic", Input: 1_000_000, Output: 1_000_000}}}
+	for _, invalid := range []Config{
+		func() Config { c := base; c.Windows = nil; return c }(),
+		func() Config {
+			c := base
+			c.Windows = []WindowCondition{{DurationSeconds: 3600, Limit: 100}, {DurationSeconds: 3600, Limit: 200}}
+			return c
+		}(),
+		func() Config { c := base; c.Windows = []WindowCondition{{DurationSeconds: 3599, Limit: 100}}; return c }(),
+		func() Config { c := base; c.Windows = []WindowCondition{{DurationSeconds: 3601, Limit: 100}}; return c }(),
+		func() Config {
+			c := base
+			c.Windows = []WindowCondition{{DurationSeconds: 366 * 86400, Limit: 100}}
+			return c
+		}(),
+		func() Config { c := base; c.Windows = []WindowCondition{{DurationSeconds: 3600, Limit: -1}}; return c }(),
+		func() Config {
+			c := base
+			c.Members = []Share{{UserID: user, WindowOverrides: []MemberWindowLimit{{DurationSeconds: 5 * 3600, Limit: -1}}}}
+			return c
+		}(),
+		func() Config {
+			c := base
+			c.Members = []Share{{UserID: user, WindowOverrides: []MemberWindowLimit{{DurationSeconds: 5 * 3600, Limit: 100}, {DurationSeconds: 5 * 3600, Limit: 200}}}}
+			return c
+		}(),
+		func() Config { c := base; c.Total = 100; return c }(),
+		func() Config { c := base; c.ResetTime = "09:00"; return c }(),
+		func() Config { c := base; c.Period = "day"; return c }(),
+		func() Config {
+			c := base
+			c.Windows = make([]WindowCondition, 9)
+			for i := range c.Windows {
+				c.Windows[i] = WindowCondition{DurationSeconds: int64(i+1) * 3600, Limit: 100}
+			}
+			return c
+		}(),
+		func() Config {
+			c := base
+			c.Mode = "amount"
+			c.Period = "day"
+			return c
+		}(),
+	} {
+		if _, err := s.SaveScheme(ctx, 0, SchemeInput{Name: "Synthetic dual", GroupID: 2, Enabled: true, Config: invalid}); !errors.Is(err, ErrInput) {
+			t.Fatal("invalid windowed amount accepted", invalid, err)
+		}
+	}
+}
+
+func TestUnknownWindowOverrideReturnsSpecificError(t *testing.T) {
+	manager, _, user, _ := fixture(t)
+	_, err := manager.SaveScheme(context.Background(), 0, SchemeInput{Name: "Synthetic stale override", GroupID: 2, Enabled: true, Config: Config{
+		Mode: "windows", Period: "durations", Windows: []WindowCondition{{DurationSeconds: 5 * 3600, Limit: 100}},
+		Members: []Share{{UserID: user, WindowOverrides: []MemberWindowLimit{{DurationSeconds: 7 * 86400, Limit: 100}}}},
+		Rates:   []Rate{{Model: "synthetic", Input: 1_000_000, Output: 1_000_000}},
+	}})
+	if !errors.Is(err, ErrUnknownWindowOverride) {
+		t.Fatal("want unknown-window-override error, got", err)
+	}
+}
+
+func TestWindowedAmountPendingExposureFollowsEachWindow(t *testing.T) {
+	s, conn, user, account := fixture(t)
+	ctx := context.Background()
+	now := time.Date(2030, 4, 15, 12, 0, 0, 0, time.UTC).Unix()
+	s.now = func() time.Time { return unix(now) }
+	scheme, err := s.SaveScheme(ctx, 0, SchemeInput{Name: "Synthetic dual pending", GroupID: 2, Enabled: true, Config: Config{
+		Mode: "windows", Period: "durations", Windows: []WindowCondition{{DurationSeconds: 5 * 3600, Limit: 100}, {DurationSeconds: 7 * 86400, Limit: 200}}, Members: []Share{{UserID: user}},
+		Rates: []Rate{{Model: "synthetic", Input: 1_000_000, Output: 1_000_000}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := db.New(conn)
+	r := Request{ID: "synthetic-unmetered", SchemeID: scheme.ID, UserID: user, GroupID: 2, AccountID: account, Model: "synthetic", StartedAt: now}
+	if err := Begin(ctx, q, r, now, time.UTC); err != nil {
+		t.Fatal(err)
+	}
+	if err := Finish(ctx, q, r.ID, Completion{Known: false, Dispatched: true}, now*1000, false); err != nil {
+		t.Fatal(err)
+	}
+	now += 5 * 3600
+	detail, err := s.Detail(ctx, scheme.ID, user)
+	if err != nil || len(detail.Balances) != 2 {
+		t.Fatal(err, detail.Balances)
+	}
+	if detail.Balances[0].PendingCurrent != 0 || detail.Balances[0].Reserved != 0 || detail.Balances[1].PendingCurrent != 1 || detail.Balances[1].Reserved != 20 {
+		t.Fatal("five-hour rollover erased weekly pending exposure", detail.Balances)
+	}
+	if _, err := Check(ctx, q, scheme.ID, user, 2, account, "synthetic", now, time.UTC); err != nil {
+		t.Fatal("one weekly pending request froze both windows", err)
+	}
+}
+
+func TestWindowedAmountChangesStartAtLongestWindowBoundary(t *testing.T) {
+	s, _, user, _ := fixture(t)
+	ctx := context.Background()
+	now := time.Date(2030, 4, 15, 12, 0, 0, 0, time.UTC).Unix()
+	start := now
+	s.now = func() time.Time { return unix(now) }
+	config := Config{Mode: "windows", Period: "durations", Windows: []WindowCondition{{DurationSeconds: 2 * 3600, Limit: 100}, {DurationSeconds: 3 * 86400, Limit: 200}}, Members: []Share{{UserID: user}}, Rates: []Rate{{Model: "synthetic", Input: 1_000_000, Output: 1_000_000}}}
+	scheme, err := s.SaveScheme(ctx, 0, SchemeInput{Name: "Synthetic dual revisions", GroupID: 2, Enabled: true, Config: config})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now += 3600
+	config.Windows = []WindowCondition{{DurationSeconds: 2 * 3600, Limit: 150}, {DurationSeconds: 3 * 86400, Limit: 200}}
+	updated, err := s.SaveScheme(ctx, scheme.ID, SchemeInput{Name: scheme.Name, GroupID: 2, Enabled: true, Config: config})
+	if err != nil || updated.Next == nil {
+		t.Fatal(err, updated)
+	}
+	if updated.Config.Windows[0].Limit != 100 || updated.Next.Config.Windows[0].Limit != 150 || updated.Next.EffectiveAt != start+3*86400 {
+		t.Fatal("condition edit changed an active long window", updated)
+	}
+}
+
+func TestWindowedAmountAllowsEachLimitToBeUnlimited(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		five, seven   int64
+		wantFive      string
+		wantSeven     string
+		wantAdmission error
+	}{
+		{name: "five only", five: 100, seven: 0, wantFive: "exhausted", wantSeven: "unlimited", wantAdmission: ErrQuota},
+		{name: "seven only", five: 0, seven: 200, wantFive: "unlimited", wantSeven: "exhausted", wantAdmission: ErrQuota},
+		{name: "both unlimited", five: 0, seven: 0, wantFive: "unlimited", wantSeven: "unlimited"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, conn, user, account := fixture(t)
+			ctx := context.Background()
+			now := time.Date(2030, 4, 15, 12, 0, 0, 0, time.UTC).Unix()
+			s.now = func() time.Time { return unix(now) }
+			scheme, err := s.SaveScheme(ctx, 0, SchemeInput{Name: "Synthetic optional windows", GroupID: 2, Enabled: true, Config: Config{
+				Mode: "windows", Period: "durations", Windows: []WindowCondition{{DurationSeconds: 5 * 3600, Limit: tc.five}, {DurationSeconds: 7 * 86400, Limit: tc.seven}}, Members: []Share{{UserID: user}},
+				Rates: []Rate{{Model: "synthetic", Input: 1_000_000, Output: 1_000_000}},
+			}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			q := db.New(conn)
+			r := Request{ID: "synthetic-usage", SchemeID: scheme.ID, UserID: user, GroupID: 2, AccountID: account, Model: "synthetic", StartedAt: now}
+			if err := Begin(ctx, q, r, now, time.UTC); err != nil {
+				t.Fatal(err)
+			}
+			if err := Finish(ctx, q, r.ID, Completion{Input: 250, Known: true, Dispatched: true}, now*1000, false); err != nil {
+				t.Fatal(err)
+			}
+			_, err = Check(ctx, q, scheme.ID, user, 2, account, r.Model, now, time.UTC)
+			if tc.wantAdmission == nil && err != nil || tc.wantAdmission != nil && !errors.Is(err, tc.wantAdmission) {
+				t.Fatal("wrong unlimited admission", err)
+			}
+			detail, err := s.Detail(ctx, scheme.ID, user)
+			if err != nil || len(detail.Balances) != 2 {
+				t.Fatal(err, detail.Balances)
+			}
+			if detail.Balances[0].Admission != tc.wantFive || detail.Balances[1].Admission != tc.wantSeven || detail.Balances[0].Used != 250 || detail.Balances[1].Used != 250 {
+				t.Fatal("unlimited balance lost recorded usage or changed status", detail.Balances)
+			}
+		})
+	}
+}
+
+func TestWindowedSharedDefaultsAndMemberOverrideKeepSeparateLedgers(t *testing.T) {
+	s, conn, user, account := fixture(t)
+	ctx := context.Background()
+	now := time.Date(2030, 4, 15, 12, 0, 0, 0, time.UTC).Unix()
+	s.now = func() time.Time { return unix(now) }
+	identity, err := auth.New(conn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := identity.CreateMember(ctx, "synthetic-second", "synthetic-pass")
+	if err != nil {
+		t.Fatal(err)
+	}
+	third, err := identity.CreateMember(ctx, "synthetic-third", "synthetic-pass")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := grantPoolMembers(ctx, conn, 2, second.ID, third.ID); err != nil {
+		t.Fatal(err)
+	}
+	config := Config{
+		Mode: "windows", Period: "durations", Windows: []WindowCondition{{DurationSeconds: 5 * 3600, Limit: 100}, {DurationSeconds: 7 * 86400, Limit: 200}},
+		Members: []Share{{UserID: user}, {UserID: second.ID}, {UserID: third.ID, WindowOverrides: []MemberWindowLimit{{DurationSeconds: 5 * 3600, Limit: 300}, {DurationSeconds: 7 * 86400, Limit: 0}}}},
+		Rates:   []Rate{{Model: "synthetic", Input: 1_000_000, Output: 1_000_000}},
+	}
+	scheme, err := s.SaveScheme(ctx, 0, SchemeInput{Name: "Synthetic shared windows", GroupID: 2, Enabled: true, Config: config})
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := db.New(conn)
+	first := Request{ID: "synthetic-first", SchemeID: scheme.ID, UserID: user, GroupID: 2, AccountID: account, Model: "synthetic", StartedAt: now}
+	if err := Begin(ctx, q, first, now, time.UTC); err != nil {
+		t.Fatal(err)
+	}
+	if err := Finish(ctx, q, first.ID, Completion{Input: 100, Known: true, Dispatched: true}, now*1000, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Check(ctx, q, scheme.ID, user, 2, account, "synthetic", now, time.UTC); !errors.Is(err, ErrQuota) {
+		t.Fatal("first member did not inherit five-hour limit", err)
+	}
+	if _, err := Check(ctx, q, scheme.ID, second.ID, 2, account, "synthetic", now, time.UTC); err != nil {
+		t.Fatal("one member's usage blocked another inherited ledger", err)
+	}
+	secondDetail, err := s.Detail(ctx, scheme.ID, second.ID)
+	if err != nil || len(secondDetail.Balances) != 2 || secondDetail.Balances[0].Limit != 100 || secondDetail.Balances[0].Used != 0 || secondDetail.Balances[1].Limit != 200 {
+		t.Fatal("second member did not inherit shared limits", secondDetail.Balances, err)
+	}
+	thirdRequest := Request{ID: "synthetic-third-request", SchemeID: scheme.ID, UserID: third.ID, GroupID: 2, AccountID: account, Model: "synthetic", StartedAt: now}
+	if err := Begin(ctx, q, thirdRequest, now, time.UTC); err != nil {
+		t.Fatal(err)
+	}
+	if err := Finish(ctx, q, thirdRequest.ID, Completion{Input: 250, Known: true, Dispatched: true}, now*1000, false); err != nil {
+		t.Fatal(err)
+	}
+	thirdDetail, err := s.Detail(ctx, scheme.ID, third.ID)
+	if err != nil || len(thirdDetail.Balances) != 2 || thirdDetail.Balances[0].Limit != 300 || thirdDetail.Balances[0].Used != 250 || thirdDetail.Balances[1].Admission != "unlimited" {
+		t.Fatal("personal override did not replace shared limits", thirdDetail.Balances, err)
+	}
+}
+
+func TestDynamicWindowConditionsUseEachCustomDuration(t *testing.T) {
+	s, conn, user, account := fixture(t)
+	ctx := context.Background()
+	now := time.Date(2030, 4, 15, 12, 0, 0, 0, time.UTC).Unix()
+	start := now
+	s.now = func() time.Time { return unix(now) }
+	config := Config{
+		Mode: "windows", Period: "durations",
+		Windows: []WindowCondition{{DurationSeconds: 2 * 3600, Limit: 100}, {DurationSeconds: 3 * 86400, Limit: 200}},
+		Members: []Share{{UserID: user}},
+		Rates:   []Rate{{Model: "synthetic", Input: 1_000_000, Output: 1_000_000}},
+	}
+	scheme, err := s.SaveScheme(ctx, 0, SchemeInput{Name: "Synthetic custom windows", GroupID: 2, Enabled: true, Config: config})
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := db.New(conn)
+	charge := func(id string, cost int64) {
+		t.Helper()
+		r := Request{ID: id, SchemeID: scheme.ID, UserID: user, GroupID: 2, AccountID: account, Model: "synthetic", StartedAt: now}
+		if err := Begin(ctx, q, r, now, time.UTC); err != nil {
+			t.Fatal(err)
+		}
+		if err := Finish(ctx, q, id, Completion{Input: cost, Known: true, Dispatched: true}, now*1000, false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	charge("synthetic-custom-first", 100)
+	entry, err := q.GetAllocationEntry(ctx, "synthetic-custom-first")
+	if err != nil || entry.ResetAt != start+3*86400 {
+		t.Fatal("retention marker ended before the longest window", entry.ResetAt, err)
+	}
+	detail, err := s.Detail(ctx, scheme.ID, user)
+	if err != nil || len(detail.Balances) != 2 || detail.Balances[0].WindowSeconds != 2*3600 || detail.Balances[0].Used != 100 || detail.Balances[1].WindowSeconds != 3*86400 || detail.Balances[1].Used != 100 {
+		t.Fatal("custom windows did not count the same request", detail.Balances, err)
+	}
+	if _, err := Check(ctx, q, scheme.ID, user, 2, account, "synthetic", now, time.UTC); !errors.Is(err, ErrQuota) {
+		t.Fatal("short custom window did not enforce its limit", err)
+	}
+	now = start + 2*3600
+	if _, err := Check(ctx, q, scheme.ID, user, 2, account, "synthetic", now, time.UTC); err != nil {
+		t.Fatal("short custom window did not renew", err)
+	}
+	charge("synthetic-custom-second", 100)
+	if _, err := Check(ctx, q, scheme.ID, user, 2, account, "synthetic", now, time.UTC); !errors.Is(err, ErrQuota) {
+		t.Fatal("long custom window did not enforce its limit", err)
+	}
+	now = start + 3*86400
+	if _, err := Check(ctx, q, scheme.ID, user, 2, account, "synthetic", now, time.UTC); err != nil {
+		t.Fatal("long custom window did not renew", err)
 	}
 }
 

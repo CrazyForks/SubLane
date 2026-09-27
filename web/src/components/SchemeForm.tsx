@@ -1,7 +1,5 @@
-import { useState, type FormEvent } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { catalogOptions } from '@/lib/catalog'
-import { useTimeZone } from '@/lib/timezone'
+import { useRef, useState, type FormEvent } from 'react'
+import { formatInstanceDate, useTimeZone } from '@/lib/timezone'
 import { useTranslation } from 'react-i18next'
 import { ChevronDown } from 'lucide-react'
 import {
@@ -11,11 +9,10 @@ import {
   modeLabels,
   parseAllocationValue,
   allocationValue,
-  lookupModelPrice,
-  lookupModelPrices,
 } from '@/lib/allocations'
 import { Button } from './ui/Button'
 import { Input } from './ui/Input'
+import { AllocationPriceWarning } from './AllocationPriceWarning'
 
 import {
   DropdownMenu,
@@ -75,171 +72,21 @@ function SchemeChoice({
     </DropdownMenu>
   )
 }
-function ModelChoice({
-  id,
-  groupID,
-  value,
-  excluded,
-  pending,
-  onChange,
-}: {
+
+type WindowDraft = {
   id: string
-  groupID: number
-  value: string
-  excluded: string[]
-  pending: boolean
-  onChange: (model: string) => void
-}) {
-  const { t } = useTranslation()
-  const client = useQueryClient()
-  const query = useQuery(catalogOptions(client, { kind: 'group', id: groupID }))
-  // Keep a saved model visible even if it is absent from the current pool catalog.
-  const models = [
-    ...new Set([...(value ? [value] : []), ...(query.data?.models ?? [])]),
-  ].filter((model) => model === value || !excluded.includes(model))
-  return (
-    <div className="min-w-0 flex-1 space-y-2">
-      <SchemeChoice
-        id={id}
-        label={t('allocationModelID')}
-        value={value}
-        placeholder={t(
-          query.isPending ? 'catalogLoading' : 'allocationChooseModel',
-        )}
-        options={models.map((model) => ({ value: model, label: model }))}
-        disabled={pending || models.length === 0}
-        onChange={onChange}
-      />
-      {(query.isError || query.data?.refresh_failed) && (
-        <p role="status" className="text-xs text-warning">
-          {t('catalogLoadFailed')}
-        </p>
-      )}
-      {query.data?.partial && (
-        <p role="status" className="text-xs text-muted-foreground">
-          {t('catalogPartial')}
-        </p>
-      )}
-      {query.data && !query.data.known && (
-        <p role="status" className="text-xs text-muted-foreground">
-          {t('catalogUnknownHint')}
-        </p>
-      )}
-      {query.data?.known && query.data.models.length === 0 && (
-        <p role="status" className="text-xs text-muted-foreground">
-          {t('catalogEmptyGroup')}
-        </p>
-      )}
-      {(query.isError ||
-        query.data?.refresh_failed ||
-        query.data?.models.length === 0) && (
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          disabled={pending || query.isFetching}
-          onClick={() => query.refetch()}
-        >
-          {t('catalogReload')}
-        </Button>
-      )}
-    </div>
-  )
+  duration: string
+  unit: 'hours' | 'days'
+  limit: string
 }
-type RateDraft = {
-  model: string
-  input: string
-  cached: string
-  output: string
-  priceState?: 'loading' | 'missing' | 'failed'
+
+function durationSeconds(draft: WindowDraft): number | null {
+  if (!/^[1-9]\d{0,3}$/.test(draft.duration)) return null
+  const seconds =
+    Number(draft.duration) * (draft.unit === 'days' ? 86400 : 3600)
+  return seconds <= 365 * 86400 ? seconds : null
 }
-function AddAllModels({
-  groupID,
-  rates,
-  pending,
-  onAdd,
-}: {
-  groupID: number
-  rates: RateDraft[]
-  pending: boolean
-  onAdd: (models: string[]) => Promise<void>
-}) {
-  const { t } = useTranslation()
-  const client = useQueryClient()
-  const query = useQuery(catalogOptions(client, { kind: 'group', id: groupID }))
-  const selected = new Set(rates.map((rate) => rate.model))
-  const missing = [...new Set(query.data?.models ?? [])].filter(
-    (model) => !selected.has(model),
-  )
-  const overLimit = missing.length > 128 - rates.length
-  const unavailable =
-    query.isPending ||
-    query.isError ||
-    query.isFetching ||
-    !query.data?.known ||
-    !query.data.usable ||
-    query.data.partial ||
-    query.data.stale ||
-    query.data.refreshing ||
-    query.data.refresh_failed
-  const catalogStatus =
-    query.isError || query.data?.refresh_failed
-      ? 'catalogLoadFailed'
-      : query.data?.partial
-        ? 'catalogPartial'
-        : query.data && !query.data.known
-          ? 'catalogUnknownHint'
-          : query.data?.known && query.data.models.length === 0
-            ? 'catalogEmptyGroup'
-            : query.data?.stale
-              ? 'catalogStale'
-              : query.data?.refreshing
-                ? 'catalogRefreshing'
-                : null
-  return (
-    <div className="space-y-2">
-      <Button
-        type="button"
-        variant="outline"
-        disabled={pending || unavailable || overLimit || missing.length === 0}
-        onClick={() => onAdd(missing)}
-      >
-        {t('allocationAddAllRates', { count: missing.length })}
-      </Button>
-      {overLimit && (
-        <p role="status" className="text-xs text-muted-foreground">
-          {t('allocationRateLimit')}
-        </p>
-      )}
-      {rates.length === 0 && catalogStatus && (
-        <p
-          role="status"
-          className={
-            catalogStatus === 'catalogLoadFailed'
-              ? 'text-xs text-warning'
-              : 'text-xs text-muted-foreground'
-          }
-        >
-          {t(catalogStatus)}
-        </p>
-      )}
-      {(query.isError ||
-        query.data?.refresh_failed ||
-        query.data?.models.length === 0) &&
-        rates.length === 0 && (
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            disabled={pending || query.isFetching}
-            onClick={() => query.refetch()}
-          >
-            {t('catalogReload')}
-          </Button>
-        )}
-    </div>
-  )
-}
+
 export function SchemeForm({
   groups,
   groupID,
@@ -259,7 +106,7 @@ export function SchemeForm({
   onCancel: () => void
   pending: boolean
 }) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const timeZone = useTimeZone()
   const initial = scheme?.next?.config ?? scheme?.config
   const [name, setName] = useState(scheme?.name ?? '')
@@ -267,8 +114,8 @@ export function SchemeForm({
   const [ratioUnit, setRatioUnit] = useState<'amount' | 'tokens'>(
     initial?.ratio_unit ?? 'tokens',
   )
-  const [period, setPeriod] = useState(
-    initial?.period === 'day' ? 'day' : 'month',
+  const [period, setPeriod] = useState<'day' | 'month' | 'durations'>(
+    initial?.period ?? 'month',
   )
   const [resetTime, setResetTime] = useState(initial?.reset_time ?? '00:00')
   const [resetDay, setResetDay] = useState(String(initial?.reset_day ?? 1))
@@ -278,171 +125,187 @@ export function SchemeForm({
       ? allocationValue(initial.total, initial.ratio_unit ?? 'tokens')
       : '',
   )
+  const [windowRules, setWindowRules] = useState<WindowDraft[]>(
+    initial?.mode === 'windows'
+      ? (initial.windows ?? []).map((rule, index) => ({
+          id: `saved-${index}`,
+          duration: String(
+            rule.duration_seconds % 86400 === 0
+              ? rule.duration_seconds / 86400
+              : rule.duration_seconds / 3600,
+          ),
+          unit: rule.duration_seconds % 86400 === 0 ? 'days' : 'hours',
+          limit: rule.limit ? allocationValue(rule.limit, 'amount') : '',
+        }))
+      : [],
+  )
+  const nextRuleID = useRef(0)
   const [startNext, setStartNext] = useState(false)
+  const [previewAnchor] = useState(() => Math.floor(Date.now() / 1000))
   const [values, setValues] = useState<Record<number, string>>(
     Object.fromEntries(
       initial?.members.map((m) => [
         m.user_id,
-        allocationValue(m.limit, initial.mode),
+        initial.mode === 'windows' && m.limit === 0
+          ? ''
+          : allocationValue(m.limit, initial.mode),
       ]) ?? [],
     ),
   )
-  const [rates, setRates] = useState<RateDraft[]>(
-    initial?.rates.map((r) => ({
-      model: r.model,
-      input: allocationValue(r.input, 'amount'),
-      cached: allocationValue(r.cached, 'amount'),
-      output: allocationValue(r.output, 'amount'),
-    })) ?? [],
+  const [selectedMembers, setSelectedMembers] = useState<
+    Record<number, boolean>
+  >(
+    Object.fromEntries(
+      initial?.members.map((member) => [member.user_id, true]) ?? [],
+    ),
   )
-  const [advancedRates, setAdvancedRates] = useState(
-    mode !== 'ratio' || (!!scheme && (initial?.rates.length ?? 0) > 0),
+  const [memberCustomization, setMemberCustomization] = useState<
+    Record<number, boolean>
+  >(
+    Object.fromEntries(
+      initial?.mode === 'windows'
+        ? initial.members.map((member) => [
+            member.user_id,
+            (member.window_overrides?.length ?? 0) > 0,
+          ])
+        : [],
+    ),
+  )
+  const [windowOverrideValues, setWindowOverrideValues] = useState<
+    Record<number, Record<string, string>>
+  >(
+    Object.fromEntries(
+      initial?.mode === 'windows'
+        ? initial.members.map((member): [number, Record<string, string>] => {
+            const values: Record<string, string> = {}
+            for (const override of member.window_overrides ?? []) {
+              const index = (initial.windows ?? []).findIndex(
+                (rule) => rule.duration_seconds === override.duration_seconds,
+              )
+              if (index >= 0)
+                values[`saved-${index}`] = override.limit
+                  ? allocationValue(override.limit, 'amount')
+                  : ''
+            }
+            return [member.user_id, values]
+          })
+        : [],
+    ),
   )
   const [invalid, setInvalid] = useState(false)
   const shareMode = mode === 'ratio'
-  const tokenBased = mode === 'tokens' || (shareMode && ratioUnit === 'tokens')
   const total = members.reduce(
-    (sum, m) => sum + (parseAllocationValue(values[m.id] ?? '', mode) ?? 0),
+    (sum, m) =>
+      sum +
+      (selectedMembers[m.id]
+        ? (parseAllocationValue(values[m.id] ?? '', mode) ?? 0)
+        : 0),
     0,
   )
+  const selectedCount = members.filter(
+    (member) => selectedMembers[member.id],
+  ).length
+  const longestDraftWindow = Math.max(
+    0,
+    ...windowRules.map((rule) => durationSeconds(rule) ?? 0),
+  )
+  const effectivePreview = scheme
+    ? (scheme.edit_effective_at ?? 0)
+    : startNext && mode === 'windows' && longestDraftWindow > 0
+      ? previewAnchor + longestDraftWindow
+      : 0
+  const effectivePreviewDate = effectivePreview
+    ? formatInstanceDate(
+        effectivePreview * 1000,
+        i18n.resolvedLanguage ?? 'en',
+        timeZone,
+        { dateStyle: 'medium', timeStyle: 'short' },
+      )
+    : ''
   const changeMode = (next: AllocationMode) => {
     if (next !== mode) {
       setMode(next)
-      setAdvancedRates(next !== 'ratio')
+      if (next === 'windows') setPeriod('durations')
+      else if (period === 'durations') setPeriod('month')
       setValues({})
+      setWindowRules([])
+      setSelectedMembers({})
+      setMemberCustomization({})
+      setWindowOverrideValues({})
       setInvalid(false)
-    }
-  }
-  const updateRate = (i: number, field: keyof RateDraft, value: string) =>
-    setRates((all) =>
-      all.map((r, n) => (n === i ? { ...r, [field]: value } : r)),
-    )
-  const fillPrice = async (index: number, model: string) => {
-    const draft: RateDraft = {
-      model,
-      input: '',
-      cached: '',
-      output: '',
-      priceState: 'loading',
-    }
-    setRates((all) => all.map((rate, i) => (i === index ? draft : rate)))
-    try {
-      const price = await lookupModelPrice(model)
-      // Match the exact selection, not its array index: rows can be removed or
-      // another model selected before this request finishes.
-      setRates((all) =>
-        all.map((rate) =>
-          rate === draft
-            ? {
-                model,
-                input: price ? allocationValue(price.input, 'amount') : '',
-                cached: price ? allocationValue(price.cached, 'amount') : '',
-                output: price ? allocationValue(price.output, 'amount') : '',
-                priceState: price ? undefined : 'missing',
-              }
-            : rate,
-        ),
-      )
-    } catch {
-      setRates((all) =>
-        all.map((rate) =>
-          rate === draft ? { ...rate, priceState: 'failed' } : rate,
-        ),
-      )
-    }
-  }
-  const fillAllPrices = async (models: string[]) => {
-    const drafts: RateDraft[] = models.map((model) => ({
-      model,
-      input: '',
-      cached: '',
-      output: '',
-      priceState: 'loading',
-    }))
-    setRates((all) => [...all, ...drafts])
-    try {
-      const prices = await lookupModelPrices(models)
-      setRates((all) =>
-        all.map((rate) => {
-          // Removed or reselected rows no longer match their original drafts.
-          const index = drafts.indexOf(rate)
-          if (index < 0) return rate
-          const price = prices[models[index]]
-          return {
-            model: rate.model,
-            input: price ? allocationValue(price.input, 'amount') : '',
-            cached: price ? allocationValue(price.cached, 'amount') : '',
-            output: price ? allocationValue(price.output, 'amount') : '',
-            priceState: price ? undefined : 'missing',
-          }
-        }),
-      )
-    } catch {
-      setRates((all) =>
-        all.map((rate) =>
-          drafts.includes(rate) ? { ...rate, priceState: 'failed' } : rate,
-        ),
-      )
     }
   }
   const submit = (event: FormEvent) => {
     event.preventDefault()
-    if (
-      pending ||
-      (!tokenBased && rates.some((rate) => rate.priceState === 'loading'))
-    )
-      return
-    const shares = members
-      .filter((m) => (values[m.id] ?? '').trim() !== '')
-      .map((m) => ({
-        user_id: m.id,
-        limit: parseAllocationValue(values[m.id], mode) ?? -1,
-      }))
-    const parsedRates = tokenBased
-      ? []
-      : mode === 'ratio' && !advancedRates
-        ? // Editing shares must preserve the revision's pricing snapshot even
-          // while pricing controls are collapsed. New resources resolve prices automatically.
-          initial?.mode === 'ratio' && initial.ratio_unit === 'amount'
-          ? initial.rates
-          : []
-        : rates.map((r) => ({
-            model: r.model.trim(),
-            input: parseAllocationValue(r.input, 'amount') ?? -1,
-            cached: parseAllocationValue(r.cached, 'amount') ?? -1,
-            output: parseAllocationValue(r.output, 'amount') ?? -1,
+    if (pending) return
+    const windowLimit = (value: string | undefined) =>
+      parseAllocationValue(value?.trim() ? value : '0', 'amount') ?? -1
+    const parsedWindows =
+      mode === 'windows'
+        ? windowRules.map((rule) => ({
+            duration_seconds: durationSeconds(rule) ?? -1,
+            limit: windowLimit(rule.limit),
           }))
+        : []
+    const shares = members
+      .filter((m) => selectedMembers[m.id])
+      .map((m) => {
+        if (mode !== 'windows')
+          return {
+            user_id: m.id,
+            limit: parseAllocationValue(values[m.id], mode) ?? -1,
+          }
+        const overrides = memberCustomization[m.id]
+          ? windowRules.flatMap((rule, index) => {
+              const value = windowOverrideValues[m.id]?.[rule.id]
+              return value === undefined
+                ? []
+                : [
+                    {
+                      duration_seconds: parsedWindows[index].duration_seconds,
+                      limit: windowLimit(value),
+                    },
+                  ]
+            })
+          : []
+        return {
+          user_id: m.id,
+          limit: 0,
+          ...(overrides.length > 0 ? { window_overrides: overrides } : {}),
+        }
+      })
     const totalBudget = shareMode
       ? (parseAllocationValue(ratioTotal, ratioUnit) ?? -1)
       : 0
+    const validShareBudget = (budget: number) =>
+      budget > 0 &&
+      budget <= 1_000_000_000_000 &&
+      shares.every((m) => Math.floor((budget * m.limit) / 10000) > 0)
     const bad =
       !name.trim() ||
       !groupID ||
-      !/^(?:[01][0-9]|2[0-3]):[0-5][0-9]$/.test(resetTime) ||
+      (mode !== 'windows' &&
+        !/^(?:[01][0-9]|2[0-3]):[0-5][0-9]$/.test(resetTime)) ||
       (period === 'month' &&
         (!/^\d{1,2}$/.test(resetDay) ||
           Number(resetDay) < 1 ||
           Number(resetDay) > 31)) ||
       shares.length === 0 ||
-      shares.some((m) => m.limit <= 0) ||
-      (shareMode && total > 10000) ||
-      (shareMode &&
-        (totalBudget <= 0 ||
-          totalBudget > 1_000_000_000_000 ||
-          shares.some(
-            (m) => Math.floor((totalBudget * m.limit) / 10000) === 0,
+      (mode === 'windows' &&
+        (parsedWindows.length === 0 ||
+          parsedWindows.length > 8 ||
+          new Set(parsedWindows.map((rule) => rule.duration_seconds)).size !==
+            parsedWindows.length ||
+          parsedWindows.some(
+            (rule) => rule.duration_seconds < 3600 || rule.limit < 0,
           ))) ||
-      ((mode === 'amount' ||
-        (shareMode && ratioUnit === 'amount' && advancedRates)) &&
-        (parsedRates.length === 0 ||
-          parsedRates.some(
-            (r) =>
-              !r.model ||
-              r.input <= 0 ||
-              r.output <= 0 ||
-              r.cached < 0 ||
-              Math.max(r.input, r.output, r.cached) > 1_000_000_000,
-          )))
+      shares.some((m) =>
+        mode === 'windows'
+          ? (m.window_overrides ?? []).some((override) => override.limit < 0)
+          : m.limit <= 0,
+      ) ||
+      (shareMode && total > 10000) ||
+      (shareMode && !validShareBudget(totalBudget))
     setInvalid(bad)
     if (bad) return
     onSubmit({
@@ -452,202 +315,419 @@ export function SchemeForm({
       start_next: startNext,
       config: {
         mode,
-        period: period as 'day' | 'month',
-        reset_time: resetTime,
+        period,
+        ...(period !== 'durations' ? { reset_time: resetTime } : {}),
         ...(period === 'month' ? { reset_day: Number(resetDay) } : {}),
         members: shares,
-        rates: parsedRates,
+        rates: [],
         ...(shareMode ? { ratio_unit: ratioUnit, total: totalBudget } : {}),
+        ...(mode === 'windows' ? { windows: parsedWindows } : {}),
       },
     })
   }
   return (
-    <form onSubmit={submit} className="space-y-6" noValidate>
-      <fieldset disabled={pending} className="space-y-6">
-        <div className="grid gap-4 sm:grid-cols-2">
-          <div className="space-y-2 sm:col-span-2">
-            <label htmlFor="scheme-name" className="text-sm font-medium">
-              {t('allocationName')}
-            </label>
-            <Input
-              id="scheme-name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              maxLength={64}
-            />
-          </div>
-          <div className="space-y-2">
-            <label htmlFor="scheme-pool" className="text-sm font-medium">
-              {t('keyGroup')}
-            </label>
-            <SchemeChoice
-              id="scheme-pool"
-              label={t('keyGroup')}
-              value={String(groupID)}
-              disabled={!!scheme || pending}
-              options={groups.map((pool) => ({
-                value: String(pool.id),
-                label: pool.name,
-              }))}
-              onChange={(value) => {
-                onGroupChange(Number(value))
-                setValues({})
-              }}
-            />
-          </div>
-        </div>
-        <p className="text-sm leading-6 text-muted-foreground">
-          {t('allocationExclusiveHint')}
-        </p>
-        <fieldset className="space-y-3">
-          <legend className="text-sm font-medium">{t('allocationMode')}</legend>
-          <div className="flex flex-wrap gap-x-6 gap-y-3">
-            {(['ratio', 'amount', 'tokens'] as const).map((value) => (
-              <label key={value} className="flex items-center gap-2 text-sm">
-                <input
-                  type="radio"
-                  name="allocation-mode"
-                  value={value}
-                  checked={mode === value}
-                  onChange={() => changeMode(value)}
-                  className="size-4 accent-primary"
-                />
-                {t(modeLabels[value])}
-              </label>
-            ))}
-          </div>
-          <p className="text-sm leading-6 text-muted-foreground">
-            {t(
-              mode === 'ratio'
-                ? 'allocationRatioHint'
-                : mode === 'amount'
-                  ? 'allocationAmountHint'
-                  : 'allocationTokensHint',
-            )}
-          </p>
-        </fieldset>
-        {shareMode && (
-          <fieldset className="space-y-3">
-            <legend className="text-sm font-medium">
-              {t('allocationRatioUnit')}
-            </legend>
-            <div className="flex flex-wrap gap-x-6 gap-y-3">
-              {(['tokens', 'amount'] as const).map((unit) => (
-                <label key={unit} className="flex items-center gap-2 text-sm">
-                  <input
-                    type="radio"
-                    name="allocation-ratio-unit"
-                    value={unit}
-                    checked={ratioUnit === unit}
-                    onChange={() => {
-                      if (ratioUnit !== unit) {
-                        setRatioUnit(unit)
-                        setRatioTotal('')
-                        setAdvancedRates(false)
-                      }
-                    }}
-                    className="size-4 accent-primary"
-                  />
-                  {t(
-                    unit === 'tokens'
-                      ? 'allocationRatioTokens'
-                      : 'allocationRatioAmount',
-                  )}
-                </label>
-              ))}
-            </div>
-          </fieldset>
-        )}
-        <div className="grid max-w-xl gap-4 sm:grid-cols-2">
-          {shareMode && (
+    <form onSubmit={submit} className="space-y-8" noValidate>
+      <fieldset disabled={pending} className="space-y-8">
+        <section className="space-y-4">
+          <h3 className="text-base font-semibold">
+            {t('allocationSectionDetails')}
+          </h3>
+          <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
-              <label
-                htmlFor="scheme-token-total"
-                className="text-sm font-medium"
-              >
-                {t('allocationTotalBudget')}
-              </label>
-              <div className="flex items-center gap-2">
-                <Input
-                  id="scheme-token-total"
-                  value={ratioTotal}
-                  onChange={(e) => setRatioTotal(e.target.value)}
-                  inputMode="decimal"
-                  className="min-w-0 text-right tabular-nums"
-                />
-                <span className="text-sm text-muted-foreground">
-                  {ratioUnit === 'amount' ? 'USD' : 'M'}
-                </span>
-              </div>
-            </div>
-          )}
-          <div className="space-y-2">
-            <label htmlFor="scheme-period" className="text-sm font-medium">
-              {t('allocationPeriod')}
-            </label>
-            <SchemeChoice
-              id="scheme-period"
-              label={t('allocationPeriod')}
-              value={period}
-              disabled={pending}
-              options={[
-                { value: 'day', label: t('periodDaily', { zone: timeZone }) },
-                {
-                  value: 'month',
-                  label: t('periodMonthly', { zone: timeZone }),
-                },
-              ]}
-              onChange={setPeriod}
-            />
-          </div>
-          {period === 'month' && (
-            <div className="space-y-2">
-              <label htmlFor="scheme-reset-day" className="text-sm font-medium">
-                {t('allocationResetDay')}
+              <label htmlFor="scheme-name" className="text-sm font-medium">
+                {t('allocationName')}
               </label>
               <Input
-                id="scheme-reset-day"
-                type="number"
-                min={1}
-                max={31}
-                step={1}
-                value={resetDay}
-                onChange={(e) => setResetDay(e.target.value)}
-                inputMode="numeric"
-                className="tabular-nums"
+                id="scheme-name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                maxLength={64}
               />
             </div>
-          )}
-          <div className="space-y-2">
-            <label htmlFor="scheme-reset-time" className="text-sm font-medium">
-              {t('allocationResetTime')}
-            </label>
-            <Input
-              id="scheme-reset-time"
-              type="time"
-              step={60}
-              value={resetTime}
-              onChange={(e) => setResetTime(e.target.value)}
-              className="tabular-nums"
-            />
+            <div className="space-y-2">
+              <label htmlFor="scheme-pool" className="text-sm font-medium">
+                {t('keyGroup')}
+              </label>
+              <SchemeChoice
+                id="scheme-pool"
+                label={t('keyGroup')}
+                value={String(groupID)}
+                disabled={!!scheme || pending}
+                options={groups.map((pool) => ({
+                  value: String(pool.id),
+                  label: pool.name,
+                }))}
+                onChange={(value) => {
+                  onGroupChange(Number(value))
+                  setValues({})
+                  setSelectedMembers({})
+                  setMemberCustomization({})
+                  setWindowOverrideValues({})
+                }}
+              />
+            </div>
           </div>
-          <p className="text-xs leading-5 text-muted-foreground sm:col-span-2">
-            {t('allocationResetZoneHint', { zone: timeZone })}{' '}
-            {period === 'month' && t('allocationResetShortMonthHint')}
+          <p className="text-sm leading-6 text-muted-foreground">
+            {t('allocationExclusiveHint')}
           </p>
-          {shareMode && (
-            <p className="text-sm leading-6 text-muted-foreground sm:col-span-2">
-              {t(
-                ratioUnit === 'amount'
-                  ? 'allocationTotalAmountHint'
-                  : 'allocationTotalTokensHint',
+        </section>
+        <section className="space-y-4 border-t border-border pt-7">
+          <h3 className="text-base font-semibold">
+            {t('allocationSectionPolicy')}
+          </h3>
+          <fieldset className="space-y-3">
+            <legend className="text-sm font-medium">
+              {t('allocationMode')}
+            </legend>
+            <div className="grid gap-x-8 gap-y-1 sm:grid-cols-2">
+              {(['ratio', 'amount', 'tokens', 'windows'] as const).map(
+                (value) => (
+                  <label
+                    key={value}
+                    className="flex min-h-12 items-start gap-3 py-2 text-sm"
+                  >
+                    <input
+                      type="radio"
+                      name="allocation-mode"
+                      value={value}
+                      checked={mode === value}
+                      onChange={() => changeMode(value)}
+                      aria-label={t(modeLabels[value])}
+                      className="mt-0.5 size-4 accent-primary"
+                    />
+                    <span className="space-y-0.5">
+                      <span className="block font-medium">
+                        {t(modeLabels[value])}
+                      </span>
+                      <span className="block text-xs leading-5 text-muted-foreground">
+                        {t(
+                          value === 'ratio'
+                            ? 'allocationModeRatioSummary'
+                            : value === 'amount'
+                              ? 'allocationModeAmountSummary'
+                              : value === 'tokens'
+                                ? 'allocationModeTokensSummary'
+                                : 'allocationModeWindowsSummary',
+                        )}
+                      </span>
+                    </span>
+                  </label>
+                ),
               )}
+            </div>
+          </fieldset>
+          {shareMode && (
+            <fieldset className="space-y-3">
+              <legend className="text-sm font-medium">
+                {t('allocationRatioUnit')}
+              </legend>
+              <div className="grid max-w-lg grid-cols-2 gap-4">
+                {(['tokens', 'amount'] as const).map((unit) => (
+                  <label
+                    key={unit}
+                    className="flex min-h-10 items-center gap-2 text-sm"
+                  >
+                    <input
+                      type="radio"
+                      name="allocation-ratio-unit"
+                      value={unit}
+                      checked={ratioUnit === unit}
+                      onChange={() => {
+                        if (ratioUnit !== unit) {
+                          setRatioUnit(unit)
+                          setRatioTotal('')
+                        }
+                      }}
+                      className="size-4 accent-primary"
+                    />
+                    {t(
+                      unit === 'tokens'
+                        ? 'allocationRatioTokens'
+                        : 'allocationRatioAmount',
+                    )}
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+          )}
+          <div className="grid max-w-2xl gap-4 sm:grid-cols-2">
+            {shareMode && (
+              <div className="space-y-2">
+                <label
+                  htmlFor="scheme-token-total"
+                  className="text-sm font-medium"
+                >
+                  {t('allocationTotalBudget')}
+                </label>
+                <div className="flex items-center gap-2">
+                  <Input
+                    id="scheme-token-total"
+                    value={ratioTotal}
+                    onChange={(e) => setRatioTotal(e.target.value)}
+                    inputMode="decimal"
+                    className="min-w-0 text-right tabular-nums"
+                  />
+                  <span className="text-sm text-muted-foreground">
+                    {ratioUnit === 'amount' ? 'USD' : 'M'}
+                  </span>
+                </div>
+              </div>
+            )}
+            {mode === 'windows' && (
+              <div className="space-y-3 sm:col-span-2">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="space-y-1">
+                    <h4 className="text-sm font-medium">
+                      {t('allocationWindowConditions')}
+                    </h4>
+                    <p className="text-xs leading-5 text-muted-foreground">
+                      {t('allocationWindowConditionsHint')}
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={windowRules.length >= 8}
+                    onClick={() => {
+                      const id = `new-${nextRuleID.current++}`
+                      setWindowRules((all) => [
+                        ...all,
+                        { id, duration: '', unit: 'hours', limit: '' },
+                      ])
+                    }}
+                  >
+                    {t('allocationAddCondition')}
+                  </Button>
+                </div>
+                <div className="divide-y divide-border border-y border-border">
+                  {windowRules.map((rule, index) => (
+                    <div
+                      key={rule.id}
+                      className="grid grid-cols-2 gap-3 py-3 sm:grid-cols-[7rem_8rem_minmax(0,1fr)_auto] sm:items-end"
+                    >
+                      <div className="space-y-2">
+                        <label
+                          htmlFor={`window-duration-${rule.id}`}
+                          className="text-sm"
+                        >
+                          {t('allocationConditionDuration', {
+                            index: index + 1,
+                          })}
+                        </label>
+                        <Input
+                          id={`window-duration-${rule.id}`}
+                          type="number"
+                          min={1}
+                          max={rule.unit === 'days' ? 365 : 8760}
+                          step={1}
+                          value={rule.duration}
+                          onChange={(event) =>
+                            setWindowRules((all) =>
+                              all.map((item) =>
+                                item.id === rule.id
+                                  ? { ...item, duration: event.target.value }
+                                  : item,
+                              ),
+                            )
+                          }
+                          inputMode="numeric"
+                          className="tabular-nums"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <label
+                          htmlFor={`window-unit-${rule.id}`}
+                          className="text-sm"
+                        >
+                          {t('allocationConditionUnit', { index: index + 1 })}
+                        </label>
+                        <select
+                          id={`window-unit-${rule.id}`}
+                          value={rule.unit}
+                          onChange={(event) =>
+                            setWindowRules((all) =>
+                              all.map((item) =>
+                                item.id === rule.id
+                                  ? {
+                                      ...item,
+                                      unit: event.target.value as
+                                        | 'hours'
+                                        | 'days',
+                                    }
+                                  : item,
+                              ),
+                            )
+                          }
+                          className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                        >
+                          <option value="hours">{t('allocationHours')}</option>
+                          <option value="days">{t('allocationDays')}</option>
+                        </select>
+                      </div>
+                      <div className="col-span-2 space-y-2 sm:col-span-1">
+                        <label
+                          htmlFor={`window-limit-${rule.id}`}
+                          className="text-sm"
+                        >
+                          {t('allocationConditionLimit', { index: index + 1 })}
+                        </label>
+                        <div className="flex items-center gap-2">
+                          <Input
+                            id={`window-limit-${rule.id}`}
+                            value={rule.limit}
+                            onChange={(event) =>
+                              setWindowRules((all) =>
+                                all.map((item) =>
+                                  item.id === rule.id
+                                    ? { ...item, limit: event.target.value }
+                                    : item,
+                                ),
+                              )
+                            }
+                            placeholder={t('allocationUnlimited')}
+                            inputMode="decimal"
+                            className="min-w-0 text-right tabular-nums"
+                          />
+                          <span className="text-sm text-muted-foreground">
+                            USD
+                          </span>
+                        </div>
+                      </div>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        className="col-span-2 justify-self-end sm:col-span-1"
+                        aria-label={t('allocationRemoveCondition', {
+                          index: index + 1,
+                        })}
+                        onClick={() =>
+                          setWindowRules((all) =>
+                            all.filter((item) => item.id !== rule.id),
+                          )
+                        }
+                      >
+                        {t('allocationRemove')}
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {mode !== 'windows' && (
+              <div className="space-y-2">
+                <label htmlFor="scheme-period" className="text-sm font-medium">
+                  {t('allocationPeriod')}
+                </label>
+                <SchemeChoice
+                  id="scheme-period"
+                  label={t('allocationPeriod')}
+                  value={period}
+                  disabled={pending}
+                  options={[
+                    {
+                      value: 'day',
+                      label: t('periodDaily', { zone: timeZone }),
+                    },
+                    {
+                      value: 'month',
+                      label: t('periodMonthly', { zone: timeZone }),
+                    },
+                  ]}
+                  onChange={(value) => setPeriod(value as 'day' | 'month')}
+                />
+              </div>
+            )}
+            {period === 'month' && (
+              <div className="space-y-2">
+                <label
+                  htmlFor="scheme-reset-day"
+                  className="text-sm font-medium"
+                >
+                  {t('allocationResetDay')}
+                </label>
+                <Input
+                  id="scheme-reset-day"
+                  type="number"
+                  min={1}
+                  max={31}
+                  step={1}
+                  value={resetDay}
+                  onChange={(e) => setResetDay(e.target.value)}
+                  inputMode="numeric"
+                  className="tabular-nums"
+                />
+              </div>
+            )}
+            {period !== 'durations' && (
+              <div className="space-y-2">
+                <label
+                  htmlFor="scheme-reset-time"
+                  className="text-sm font-medium"
+                >
+                  {t('allocationResetTime')}
+                </label>
+                <Input
+                  id="scheme-reset-time"
+                  type="time"
+                  step={60}
+                  value={resetTime}
+                  onChange={(e) => setResetTime(e.target.value)}
+                  className="tabular-nums"
+                />
+              </div>
+            )}
+            <p className="text-xs leading-5 text-muted-foreground sm:col-span-2">
+              {period === 'durations'
+                ? t('allocationWindowDurationHint', { zone: timeZone })
+                : t('allocationResetZoneHint', { zone: timeZone })}{' '}
+              {period === 'month' && t('allocationResetShortMonthHint')}
+            </p>
+            {mode === 'windows' && longestDraftWindow > 0 && (
+              <p className="text-sm leading-6 text-warning sm:col-span-2">
+                {t('allocationFutureEditDelay', {
+                  duration: t(
+                    longestDraftWindow % 86400 === 0
+                      ? 'allocationDurationDays'
+                      : 'allocationDurationHours',
+                    {
+                      value:
+                        longestDraftWindow % 86400 === 0
+                          ? longestDraftWindow / 86400
+                          : longestDraftWindow / 3600,
+                    },
+                  ),
+                })}
+              </p>
+            )}
+            {shareMode && (
+              <p className="text-sm leading-6 text-muted-foreground sm:col-span-2">
+                {t(
+                  ratioUnit === 'amount'
+                    ? 'allocationTotalAmountHint'
+                    : 'allocationTotalTokensHint',
+                )}
+              </p>
+            )}
+          </div>
+          {(mode === 'amount' ||
+            mode === 'windows' ||
+            (shareMode && ratioUnit === 'amount')) && (
+            <p className="text-sm leading-6 text-muted-foreground">
+              {t('allocationAutoPricingHint')}
             </p>
           )}
-        </div>
-        <section className="space-y-3">
+          {scheme && (
+            <AllocationPriceWarning
+              coverage={scheme.next?.price_coverage ?? scheme.price_coverage}
+              effectiveAt={scheme.edit_effective_at}
+            />
+          )}
+        </section>
+        <section className="space-y-4 border-t border-border pt-7">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <h3 className="font-medium">
+            <h3 className="text-base font-semibold">
               {t(shareMode ? 'allocationShares' : 'allocationMembers')}
             </h3>
             {shareMode && (
@@ -669,42 +749,209 @@ export function SchemeForm({
                       ]),
                     ),
                   )
+                  setSelectedMembers(
+                    Object.fromEntries(
+                      members.map((member) => [member.id, true]),
+                    ),
+                  )
                 }}
               >
                 {t('allocationSplitEqually')}
               </Button>
             )}
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={members.length > 0 && selectedCount === members.length}
+                disabled={!members.length}
+                onChange={(event) =>
+                  setSelectedMembers(
+                    Object.fromEntries(
+                      members.map((member) => [
+                        member.id,
+                        event.target.checked,
+                      ]),
+                    ),
+                  )
+                }
+                aria-label={t('allocationSelectAllMembers')}
+                className="size-4 accent-primary"
+              />
+              {t('allocationSelectAllMembers')}
+            </label>
           </div>
           <p className="text-sm text-muted-foreground">
-            {t('allocationBlankHint')}
+            {t(
+              mode === 'windows'
+                ? 'allocationWindowBlankHint'
+                : 'allocationBlankHint',
+            )}
           </p>
           <div className="divide-y divide-border">
             {members.map((m) => (
               <div
                 key={m.id}
-                className="flex items-center justify-between gap-4 py-3"
+                className={
+                  mode === 'windows'
+                    ? 'space-y-3 py-3'
+                    : 'grid gap-2 py-3 sm:grid-cols-[minmax(0,1fr)_12rem] sm:items-center sm:gap-4'
+                }
               >
-                <label
-                  htmlFor={`share-${m.id}`}
-                  className="min-w-0 break-words text-sm"
-                >
-                  {m.username}
-                </label>
-                <div className="flex shrink-0 items-center gap-2">
-                  <Input
-                    id={`share-${m.id}`}
-                    aria-label={t('allocationFor', { name: m.username })}
-                    value={values[m.id] ?? ''}
-                    onChange={(e) =>
-                      setValues((v) => ({ ...v, [m.id]: e.target.value }))
-                    }
-                    inputMode="decimal"
-                    className="w-32 text-right tabular-nums"
-                  />
-                  <span className="w-9 text-sm text-muted-foreground">
-                    {shareMode ? '%' : mode === 'amount' ? 'USD' : 'M'}
-                  </span>
-                </div>
+                {mode === 'windows' ? (
+                  <>
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <label className="flex items-center gap-2 text-sm font-medium">
+                        <input
+                          type="checkbox"
+                          checked={!!selectedMembers[m.id]}
+                          onChange={(e) =>
+                            setSelectedMembers((all) => ({
+                              ...all,
+                              [m.id]: e.target.checked,
+                            }))
+                          }
+                          aria-label={t('allocationIncludeMember', {
+                            name: m.username,
+                          })}
+                          className="size-4 accent-primary"
+                        />
+                        <span className="min-w-0 break-words">
+                          {m.username}
+                        </span>
+                      </label>
+                      {selectedMembers[m.id] && (
+                        <label className="flex items-center gap-2 text-sm">
+                          <input
+                            type="checkbox"
+                            checked={!!memberCustomization[m.id]}
+                            onChange={(e) =>
+                              setMemberCustomization((all) => ({
+                                ...all,
+                                [m.id]: e.target.checked,
+                              }))
+                            }
+                            aria-label={t('allocationOverrideMember', {
+                              name: m.username,
+                            })}
+                            className="size-4 accent-primary"
+                          />
+                          {t('allocationOverrideLimits')}
+                        </label>
+                      )}
+                    </div>
+                    {selectedMembers[m.id] && memberCustomization[m.id] && (
+                      <div className="divide-y divide-border ps-6">
+                        {windowRules.map((rule, index) => {
+                          const duration =
+                            durationSeconds(rule) === null
+                              ? t('allocationCondition', { index: index + 1 })
+                              : t(
+                                  rule.unit === 'days'
+                                    ? 'allocationDurationDays'
+                                    : 'allocationDurationHours',
+                                  { value: rule.duration },
+                                )
+                          const value = windowOverrideValues[m.id]?.[rule.id]
+                          return (
+                            <div
+                              key={rule.id}
+                              className="grid gap-2 py-2 sm:grid-cols-[minmax(0,1fr)_12rem] sm:items-center"
+                            >
+                              <label className="flex items-center gap-2 text-sm">
+                                <input
+                                  type="checkbox"
+                                  checked={value !== undefined}
+                                  onChange={(event) =>
+                                    setWindowOverrideValues((all) => {
+                                      const personal = { ...(all[m.id] ?? {}) }
+                                      if (event.target.checked)
+                                        personal[rule.id] = ''
+                                      else delete personal[rule.id]
+                                      return { ...all, [m.id]: personal }
+                                    })
+                                  }
+                                  aria-label={t('allocationOverrideWindow', {
+                                    duration,
+                                    name: m.username,
+                                  })}
+                                  className="size-4 accent-primary"
+                                />
+                                {duration}
+                              </label>
+                              {value !== undefined && (
+                                <div className="flex items-center gap-2">
+                                  <Input
+                                    aria-label={t('allocationWindowFor', {
+                                      duration,
+                                      name: m.username,
+                                    })}
+                                    value={value}
+                                    onChange={(event) =>
+                                      setWindowOverrideValues((all) => ({
+                                        ...all,
+                                        [m.id]: {
+                                          ...(all[m.id] ?? {}),
+                                          [rule.id]: event.target.value,
+                                        },
+                                      }))
+                                    }
+                                    placeholder={t('allocationUnlimited')}
+                                    inputMode="decimal"
+                                    className="min-w-0 text-right tabular-nums"
+                                  />
+                                  <span className="text-sm text-muted-foreground">
+                                    USD
+                                  </span>
+                                </div>
+                              )}
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <label className="flex min-w-0 items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={!!selectedMembers[m.id]}
+                        onChange={(event) =>
+                          setSelectedMembers((all) => ({
+                            ...all,
+                            [m.id]: event.target.checked,
+                          }))
+                        }
+                        aria-label={t('allocationIncludeMember', {
+                          name: m.username,
+                        })}
+                        className="size-4 accent-primary"
+                      />
+                      <span className="break-words">{m.username}</span>
+                    </label>
+                    <div className="flex w-full items-center gap-2 sm:w-48">
+                      <Input
+                        id={`share-${m.id}`}
+                        aria-label={t('allocationFor', { name: m.username })}
+                        value={values[m.id] ?? ''}
+                        onChange={(e) => {
+                          setValues((v) => ({ ...v, [m.id]: e.target.value }))
+                          if (e.target.value.trim()) {
+                            setSelectedMembers((all) => ({
+                              ...all,
+                              [m.id]: true,
+                            }))
+                          }
+                        }}
+                        inputMode="decimal"
+                        className="w-full text-right tabular-nums"
+                      />
+                      <span className="w-9 text-sm text-muted-foreground">
+                        {shareMode ? '%' : mode === 'amount' ? 'USD' : 'M'}
+                      </span>
+                    </div>
+                  </>
+                )}
               </div>
             ))}
           </div>
@@ -722,135 +969,36 @@ export function SchemeForm({
               })}
             </p>
           )}
+          {shareMode && (
+            <p className="text-sm leading-6 text-muted-foreground">
+              {t(
+                ratioUnit === 'amount'
+                  ? 'allocationRatioAmountRule'
+                  : 'allocationRatioTokenRule',
+              )}
+            </p>
+          )}
         </section>
-        {shareMode && (
-          <p className="text-sm leading-6 text-muted-foreground">
-            {t(
-              ratioUnit === 'amount'
-                ? 'allocationRatioAmountRule'
-                : 'allocationRatioTokenRule',
-            )}
-          </p>
-        )}
-        {scheme && (
-          <p className="text-sm leading-6 text-muted-foreground">
-            {t('allocationNextHint')}
-          </p>
-        )}
-        <details
-          className="space-y-4 border-t border-border pt-4"
-          open={
-            mode !== 'ratio' || !!scheme || advancedRates ? true : undefined
-          }
-        >
-          <summary className="cursor-pointer text-sm font-medium focus-visible:outline-2 focus-visible:outline-ring">
-            {t('allocationSettings')}
-          </summary>
-          {shareMode && ratioUnit === 'amount' && !advancedRates && (
-            <div className="space-y-2">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setAdvancedRates(true)}
-              >
-                {t('allocationAdvancedRates')}
-              </Button>
-            </div>
+        <section className="space-y-4 border-t border-border pt-7">
+          <h3 className="text-base font-semibold">
+            {t('allocationSectionActivation')}
+          </h3>
+          {scheme && (
+            <p className="text-sm leading-6 text-muted-foreground">
+              {t('allocationNextHint')}
+            </p>
           )}
-          {(mode === 'amount' ||
-            (shareMode && ratioUnit === 'amount' && advancedRates)) && (
-            <section className="space-y-3">
-              <h3 className="font-medium">{t('allocationRates')}</h3>
-              <p className="text-sm leading-6 text-muted-foreground">
-                {t('allocationRatesHint')}
-              </p>
-              {rates.map((r, i) => (
-                <div
-                  key={i}
-                  className="grid gap-3 border-b border-border pb-4 sm:grid-cols-3"
-                >
-                  <div className="space-y-2 sm:col-span-3">
-                    <label htmlFor={`rate-model-${i}`} className="text-sm">
-                      {t('allocationModelID')}
-                    </label>
-                    <div className="flex gap-2">
-                      <ModelChoice
-                        id={`rate-model-${i}`}
-                        groupID={groupID}
-                        value={r.model}
-                        excluded={rates.map((rate) => rate.model)}
-                        pending={pending}
-                        onChange={(model) => fillPrice(i, model)}
-                      />
-                      <Button
-                        variant="outline"
-                        type="button"
-                        onClick={() =>
-                          setRates((all) => all.filter((_, n) => n !== i))
-                        }
-                        aria-label={t('allocationRemoveRate', { index: i + 1 })}
-                      >
-                        {t('allocationRemove')}
-                      </Button>
-                    </div>
-                  </div>
-                  {(['input', 'cached', 'output'] as const).map((field) => (
-                    <div key={field} className="space-y-2">
-                      <label htmlFor={`rate-${field}-${i}`} className="text-sm">
-                        {t(
-                          field === 'input'
-                            ? 'allocationRateInput'
-                            : field === 'cached'
-                              ? 'allocationRateCached'
-                              : 'allocationRateOutput',
-                        )}
-                      </label>
-                      <Input
-                        id={`rate-${field}-${i}`}
-                        value={r[field]}
-                        disabled={r.priceState === 'loading'}
-                        inputMode="decimal"
-                        onChange={(e) => updateRate(i, field, e.target.value)}
-                      />
-                    </div>
-                  ))}
-                  {r.priceState && (
-                    <p className="text-xs text-muted-foreground sm:col-span-3">
-                      {t(
-                        r.priceState === 'loading'
-                          ? 'allocationPriceLoading'
-                          : r.priceState === 'missing'
-                            ? 'allocationPriceMissing'
-                            : 'allocationPriceFailed',
-                      )}
-                    </p>
-                  )}
-                </div>
-              ))}
-              <div className="flex flex-wrap items-start gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  disabled={rates.length >= 128}
-                  onClick={() =>
-                    setRates((all) => [
-                      ...all,
-                      { model: '', input: '', cached: '', output: '' },
-                    ])
-                  }
-                >
-                  {t('allocationAddRate')}
-                </Button>
-                <AddAllModels
-                  groupID={groupID}
-                  rates={rates}
-                  pending={pending}
-                  onAdd={fillAllPrices}
-                />
-              </div>
-            </section>
+          {effectivePreviewDate && (
+            <p role="status" className="text-sm leading-6 text-warning">
+              {t(
+                scheme
+                  ? 'allocationEditEffectivePreview'
+                  : 'allocationStartEffectivePreview',
+                { date: effectivePreviewDate },
+              )}
+            </p>
           )}
-          <div className="space-y-3 border-t border-border pt-5">
+          <div className="space-y-3">
             <label className="flex items-center gap-2 text-sm">
               <input
                 type="checkbox"
@@ -877,14 +1025,14 @@ export function SchemeForm({
               </p>
             )}
           </div>
-        </details>
+        </section>
       </fieldset>
       {invalid && (
         <p role="alert" className="text-sm text-error">
           {t('allocationInvalid')}
         </p>
       )}
-      <div className="flex flex-wrap justify-end gap-2">
+      <div className="flex flex-wrap justify-end gap-2 border-t border-border pt-6">
         <Button
           type="button"
           variant="outline"
@@ -893,13 +1041,7 @@ export function SchemeForm({
         >
           {t('cancel')}
         </Button>
-        <Button
-          type="submit"
-          disabled={
-            pending ||
-            (!tokenBased && rates.some((rate) => rate.priceState === 'loading'))
-          }
-        >
+        <Button type="submit" disabled={pending}>
           {t('allocationSave')}
         </Button>
       </div>
