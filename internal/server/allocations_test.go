@@ -11,10 +11,19 @@ import (
 	"github.com/murongg/SubLane/internal/upstream"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestUnknownWindowOverrideHasSpecificAPIError(t *testing.T) {
+	w := httptest.NewRecorder()
+	allocationError(w, allocations.ErrUnknownWindowOverride)
+	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "allocation_unknown_window_override") {
+		t.Fatal(w.Code, w.Body.String())
+	}
+}
 
 func TestWindowedAmountPersonalBalanceResponse(t *testing.T) {
 	f := newForwardFixture(t, func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(200) })

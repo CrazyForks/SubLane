@@ -50,6 +50,8 @@ func allocationError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, allocations.ErrInput):
 		status, code = 400, err.Error()
+	case errors.Is(err, allocations.ErrUnknownWindowOverride):
+		status, code = 400, err.Error()
 	case errors.Is(err, allocations.ErrNotFound):
 		status, code = 404, err.Error()
 	case errors.Is(err, allocations.ErrUnavailable):

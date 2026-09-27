@@ -62,6 +62,8 @@ export const en = {
   allocationWindowFor: '{{duration}} limit for {{name}}',
   allocationWindowDurationHint:
     'Each window starts when the rule takes effect and renews after its own duration. Times are shown in {{zone}} and can differ from upstream resets.',
+  allocationFutureEditDelay:
+    'Future edits may wait up to {{duration}} before taking effect, based on the longest current window.',
   allocationAutoPricingHint:
     'Model prices are filled automatically from the models supported by the selected account pool when you save.',
   allocationSave: 'Save resource allowance',
@@ -86,9 +88,9 @@ export const en = {
     'Use a dedicated pool and remove its accounts from every other pool first. After adding an allowance, the pool and its account membership stay fixed. Existing unbound keys for this pool stop working.',
   allocationMembers: 'Member allowances',
   allocationBlankHint:
-    'Leave a member blank if they should not use this resource allowance.',
+    'Select members who should receive this allowance, then enter a limit or percentage for each selected member.',
   allocationFor: 'Allowance for {{name}}',
-  allocationTotal: 'Allocated {{total}}% · Reserved {{remaining}}%',
+  allocationTotal: 'Allocated {{total}}% · Unallocated {{remaining}}%',
   allocationPeriod: 'Reset period',
   allocationWindowSchedule: '{{windows}} time windows · {{zone}}',
   allocationWindowReached: 'Limit reached',
@@ -99,7 +101,7 @@ export const en = {
   allocationWindowPendingHint:
     'Pending records across this allowance: {{pending}}. Each window counts only records within its own duration.',
   allocationWindowBlankHint:
-    'Select members who may use this allowance. Leave a shared or personal limit blank for unlimited use in that condition.',
+    'Only selected members may use this allowance. A blank amount in a shared or personal condition means unlimited use for that condition.',
   allocationResetDay: 'Day of month',
   allocationResetTime: 'Reset time',
   allocationResetZoneHint: 'Times use the instance time zone ({{zone}}).',
@@ -111,6 +113,16 @@ export const en = {
   allocationEnabled: 'Enable this resource allowance',
   allocationNextHint:
     'Changes to allowances, prices, type or reset schedule take effect next period. Pausing or enabling access takes effect immediately. Current usage and unsettled entries remain recorded.',
+  allocationEditEffectivePreview:
+    'With the current schedule, changes saved now are expected to take effect on {{date}}. Pausing or enabling access takes effect immediately.',
+  allocationStartEffectivePreview:
+    'If saved now, this rule is expected to start on {{date}}.',
+  allocationMissingPrices:
+    'Supported models without current catalog prices ({{count}}): {{models}}. Saved prices are reused when available; other requests to these models remain blocked.',
+  allocationCatalogUnavailable:
+    'Some account model catalogs are unavailable. Saved prices are retained when available; refresh account models to update coverage.',
+  allocationCurrentPricing: 'Current price coverage',
+  allocationScheduledPricing: 'Scheduled price coverage',
   allocationStartNext: 'Start next period',
   allocationImmediateHint:
     'Start immediately: the budget counts new requests from activation. Earlier usage is not backfilled.',
@@ -137,7 +149,9 @@ export const en = {
   allocationUnavailable:
     'This resource allowance is paused, scheduled, or no longer available to you.',
   allocationUnpriced:
-    'The pool model catalog is unavailable or includes a model without a price. Refresh account models or restrict the pool to priced models, then retry.',
+    'No usable model price is available for this pool. Refresh account models or restrict the pool to priced models, then retry.',
+  allocationUnknownWindowOverride:
+    'A personal limit refers to a time-window condition that no longer exists. Refresh this rule and retry.',
   allocationRatioTokensBalanceHint:
     'Each token limit equals its window’s total token budget × assigned percentage. This is an internal allowance; upstream quota may run out first.',
   allocationRatioAmountBalanceHint:

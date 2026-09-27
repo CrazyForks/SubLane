@@ -542,6 +542,126 @@ func TestAutomaticPricesFollowGroupAllowlistAndIgnoreSubmittedRates(t *testing.T
 	}
 }
 
+func TestAutomaticPricesSavePricedModelsAndWarnAboutMissingOnes(t *testing.T) {
+	_, conn, user, account := fixture(t)
+	ctx := context.Background()
+	if _, err := conn.Exec(`UPDATE accounts SET models_snapshot = ? WHERE id = ?`,
+		`{"models":["synthetic-priced","synthetic-new"],"updated_at":1,"source":"synthetic"}`, account); err != nil {
+		t.Fatal(err)
+	}
+	manager := NewWithPricing(conn, pricing.NewStatic(map[string]pricing.Price{
+		"synthetic-priced": {Input: 1_000_000, Output: 2_000_000},
+	}))
+	scheme, err := manager.SaveScheme(ctx, 0, SchemeInput{Name: "Synthetic partial pricing", GroupID: 2, Enabled: true, Config: Config{
+		Mode: "amount", Period: "day", Members: []Share{{UserID: user, Limit: 1_000_000}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(scheme.Config.Rates) != 1 || scheme.Config.Rates[0].Model != "synthetic-priced" {
+		t.Fatal("priced model was not saved", scheme.Config.Rates)
+	}
+	if len(scheme.Config.MissingPriceModels) != 1 || scheme.Config.MissingPriceModels[0] != "synthetic-new" {
+		t.Fatal("missing model price was not returned", scheme.Config.MissingPriceModels)
+	}
+	if _, err := rateFor(scheme.Revision, "synthetic-new"); !errors.Is(err, ErrUnpriced) {
+		t.Fatal("unpriced request should remain blocked", err)
+	}
+}
+
+func TestAutomaticPricesReuseSavedRateWhenCatalogPriceDisappears(t *testing.T) {
+	_, conn, user, account := fixture(t)
+	ctx := context.Background()
+	if _, err := conn.Exec(`UPDATE accounts SET models_snapshot = ? WHERE id = ?`,
+		`{"models":["synthetic-priced"],"updated_at":1,"source":"synthetic"}`, account); err != nil {
+		t.Fatal(err)
+	}
+	manager := NewWithPricing(conn, pricing.NewStatic(map[string]pricing.Price{
+		"synthetic-priced": {Input: 1_000_000, Output: 2_000_000},
+	}))
+	input := SchemeInput{Name: "Synthetic initial", GroupID: 2, Enabled: true, Config: Config{
+		Mode: "amount", Period: "day", Members: []Share{{UserID: user, Limit: 1_000_000}},
+	}}
+	scheme, err := manager.SaveScheme(ctx, 0, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager.pricing = pricing.NewStatic(map[string]pricing.Price{})
+	input.Name = "Synthetic renamed"
+	updated, err := manager.SaveScheme(ctx, scheme.ID, input)
+	if err != nil {
+		t.Fatal("existing allowance should remain editable", err)
+	}
+	if updated.Next == nil || len(updated.Next.Config.Rates) != 1 || updated.Next.Config.Rates[0] != scheme.Config.Rates[0] {
+		t.Fatal("saved price was not retained", updated.Next)
+	}
+	if len(updated.Next.Config.MissingPriceModels) != 1 || updated.Next.Config.MissingPriceModels[0] != "synthetic-priced" {
+		t.Fatal("missing current catalog price was not reported", updated.Next.Config.MissingPriceModels)
+	}
+}
+
+func TestAutomaticPricesKeepSavedRateWhenAccountCatalogIsUnavailable(t *testing.T) {
+	_, conn, user, account := fixture(t)
+	ctx := context.Background()
+	if _, err := conn.Exec(`UPDATE accounts SET models_snapshot = ? WHERE id = ?`,
+		`{"models":["synthetic-priced"],"updated_at":1,"source":"synthetic"}`, account); err != nil {
+		t.Fatal(err)
+	}
+	manager := NewWithPricing(conn, pricing.NewStatic(map[string]pricing.Price{
+		"synthetic-priced": {Input: 1_000_000, Output: 2_000_000},
+	}))
+	input := SchemeInput{Name: "Synthetic initial", GroupID: 2, Enabled: true, Config: Config{
+		Mode: "amount", Period: "day", Members: []Share{{UserID: user, Limit: 1_000_000}},
+	}}
+	scheme, err := manager.SaveScheme(ctx, 0, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Exec(`UPDATE accounts SET models_snapshot = NULL WHERE id = ?`, account); err != nil {
+		t.Fatal(err)
+	}
+	manager.pricing = pricing.NewStatic(map[string]pricing.Price{})
+	input.Name = "Synthetic renamed"
+	updated, err := manager.SaveScheme(ctx, scheme.ID, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Next == nil || !updated.Next.Config.CatalogUnavailable || len(updated.Next.Config.Rates) != 1 {
+		t.Fatal("unavailable catalog should retain usable rate and return warning", updated.Next)
+	}
+}
+
+func TestLongWindowEditReportsActualEffectiveDate(t *testing.T) {
+	manager, _, user, _ := fixture(t)
+	ctx := context.Background()
+	anchor := time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC).Unix()
+	manager.now = func() time.Time { return unix(anchor) }
+	input := SchemeInput{Name: "Synthetic long window", GroupID: 2, Enabled: true, Config: Config{
+		Mode: "windows", Period: "durations", Windows: []WindowCondition{{DurationSeconds: 30 * 86400, Limit: 1_000_000}},
+		Members: []Share{{UserID: user}}, Rates: []Rate{{Model: "synthetic", Input: 1_000_000, Output: 2_000_000}},
+	}}
+	scheme, err := manager.SaveScheme(ctx, 0, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager.now = func() time.Time { return unix(anchor + 3600) }
+	listed, err := manager.Schemes(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listed) != 1 || listed[0].EditEffectiveAt != anchor+30*86400 {
+		t.Fatal("edit preview did not match longest current window", listed)
+	}
+	input.Name = "Synthetic longer name"
+	updated, err := manager.SaveScheme(ctx, scheme.ID, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Next == nil || updated.Next.EffectiveAt != listed[0].EditEffectiveAt {
+		t.Fatal("saved edit and preview disagree", updated.Next, listed[0].EditEffectiveAt)
+	}
+}
+
 func TestAutomaticPricesSupportFullPoolCatalog(t *testing.T) {
 	_, conn, user, account := fixture(t)
 	ctx := context.Background()
@@ -837,11 +957,6 @@ func TestWindowedAmountRejectsInvalidConditionsAndOverrides(t *testing.T) {
 		func() Config { c := base; c.Windows = []WindowCondition{{DurationSeconds: 3600, Limit: -1}}; return c }(),
 		func() Config {
 			c := base
-			c.Members = []Share{{UserID: user, WindowOverrides: []MemberWindowLimit{{DurationSeconds: 3600, Limit: 100}}}}
-			return c
-		}(),
-		func() Config {
-			c := base
 			c.Members = []Share{{UserID: user, WindowOverrides: []MemberWindowLimit{{DurationSeconds: 5 * 3600, Limit: -1}}}}
 			return c
 		}(),
@@ -871,6 +986,18 @@ func TestWindowedAmountRejectsInvalidConditionsAndOverrides(t *testing.T) {
 		if _, err := s.SaveScheme(ctx, 0, SchemeInput{Name: "Synthetic dual", GroupID: 2, Enabled: true, Config: invalid}); !errors.Is(err, ErrInput) {
 			t.Fatal("invalid windowed amount accepted", invalid, err)
 		}
+	}
+}
+
+func TestUnknownWindowOverrideReturnsSpecificError(t *testing.T) {
+	manager, _, user, _ := fixture(t)
+	_, err := manager.SaveScheme(context.Background(), 0, SchemeInput{Name: "Synthetic stale override", GroupID: 2, Enabled: true, Config: Config{
+		Mode: "windows", Period: "durations", Windows: []WindowCondition{{DurationSeconds: 5 * 3600, Limit: 100}},
+		Members: []Share{{UserID: user, WindowOverrides: []MemberWindowLimit{{DurationSeconds: 7 * 86400, Limit: 100}}}},
+		Rates:   []Rate{{Model: "synthetic", Input: 1_000_000, Output: 1_000_000}},
+	}})
+	if !errors.Is(err, ErrUnknownWindowOverride) {
+		t.Fatal("want unknown-window-override error, got", err)
 	}
 }
 

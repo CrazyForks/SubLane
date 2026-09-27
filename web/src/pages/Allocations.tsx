@@ -14,6 +14,7 @@ import {
 } from '@/lib/allocations'
 import { groupOptions, poolMembersOptions } from '@/lib/groups'
 import { SchemeForm } from '@/components/SchemeForm'
+import { AllocationPriceWarning } from '@/components/AllocationPriceWarning'
 import { AllocationReport } from '@/components/AllocationReport'
 import { Button } from '@/components/ui/Button'
 import { Status } from '@/components/Status'
@@ -54,6 +55,10 @@ export function Allocations() {
   })
   const loading = query.isPending || pools.isPending
   const failed = query.isError || pools.isError
+  const editingScheme = editing
+    ? (query.data?.schemes.find((scheme) => scheme.id === editing.id) ??
+      editing)
+    : undefined
   const date = (n: number) =>
     formatInstanceDate(n * 1000, i18n.resolvedLanguage ?? 'en', timeZone, {
       dateStyle: 'short',
@@ -120,7 +125,7 @@ export function Allocations() {
             groupID={formPoolID}
             onGroupChange={setFormPoolID}
             members={roster.data?.members ?? []}
-            scheme={editing ?? undefined}
+            scheme={editingScheme}
             onSubmit={(input) => mutation.mutate({ ...input, id: editing?.id })}
             onCancel={() => setEditing(undefined)}
             pending={mutation.isPending || roster.isPending || roster.isError}
@@ -239,6 +244,18 @@ export function Allocations() {
                             zone: timeZone,
                           })}
                   </p>
+                )}
+                {s.effective_at <= query.dataUpdatedAt / 1000 && (
+                  <AllocationPriceWarning
+                    config={s.config}
+                    label={s.next ? t('allocationCurrentPricing') : undefined}
+                  />
+                )}
+                {s.next && (
+                  <AllocationPriceWarning
+                    config={s.next.config}
+                    label={t('allocationScheduledPricing')}
+                  />
                 )}
               </div>
               <div className="flex flex-wrap gap-2">

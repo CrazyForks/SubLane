@@ -22,15 +22,16 @@ import (
 )
 
 var (
-	ErrInput        = errors.New("invalid_allocation_input")
-	ErrNotFound     = errors.New("allocation_not_found")
-	ErrPoolConflict = errors.New("allocation_pool_conflict")
-	ErrUnavailable  = errors.New("allocation_unavailable")
-	ErrQuota        = errors.New("allocation_exhausted")
-	ErrPending      = errors.New("allocation_pending")
-	ErrRisk         = errors.New("allocation_risk_limit")
-	ErrUnpriced     = errors.New("allocation_model_unpriced")
-	ErrSettlement   = errors.New("invalid_allocation_settlement")
+	ErrInput                 = errors.New("invalid_allocation_input")
+	ErrNotFound              = errors.New("allocation_not_found")
+	ErrPoolConflict          = errors.New("allocation_pool_conflict")
+	ErrUnavailable           = errors.New("allocation_unavailable")
+	ErrQuota                 = errors.New("allocation_exhausted")
+	ErrPending               = errors.New("allocation_pending")
+	ErrRisk                  = errors.New("allocation_risk_limit")
+	ErrUnpriced              = errors.New("allocation_model_unpriced")
+	ErrUnknownWindowOverride = errors.New("allocation_unknown_window_override")
+	ErrSettlement            = errors.New("invalid_allocation_settlement")
 )
 
 type Share struct {
@@ -60,14 +61,16 @@ type Rate struct {
 	Output int64  `json:"output"`
 }
 type Config struct {
-	Mode      string            `json:"mode"`
-	Period    string            `json:"period"`
-	ResetTime string            `json:"reset_time,omitempty"`
-	ResetDay  int               `json:"reset_day,omitempty"`
-	Members   []Share           `json:"members"`
-	Rates     []Rate            `json:"rates"`
-	RatioUnit string            `json:"ratio_unit,omitempty"`
-	Windows   []WindowCondition `json:"windows,omitempty"`
+	Mode               string            `json:"mode"`
+	Period             string            `json:"period"`
+	ResetTime          string            `json:"reset_time,omitempty"`
+	ResetDay           int               `json:"reset_day,omitempty"`
+	Members            []Share           `json:"members"`
+	Rates              []Rate            `json:"rates"`
+	RatioUnit          string            `json:"ratio_unit,omitempty"`
+	Windows            []WindowCondition `json:"windows,omitempty"`
+	MissingPriceModels []string          `json:"missing_price_models,omitempty"`
+	CatalogUnavailable bool              `json:"catalog_unavailable,omitempty"`
 	// Total is in tokens or micro-USD according to RatioUnit.
 	Total int64 `json:"total,omitempty"`
 }
@@ -84,12 +87,13 @@ type Revision struct {
 	Config      Config `json:"config"`
 }
 type Scheme struct {
-	ID        int64  `json:"id"`
-	Name      string `json:"name"`
-	GroupID   int64  `json:"group_id"`
-	GroupName string `json:"group_name"`
-	Enabled   bool   `json:"enabled"`
-	CreatedAt int64  `json:"created_at"`
+	ID              int64  `json:"id"`
+	Name            string `json:"name"`
+	GroupID         int64  `json:"group_id"`
+	GroupName       string `json:"group_name"`
+	Enabled         bool   `json:"enabled"`
+	CreatedAt       int64  `json:"created_at"`
+	EditEffectiveAt int64  `json:"edit_effective_at"`
 	Revision
 	Next *Revision `json:"next"`
 }
@@ -142,13 +146,6 @@ func validMemberLimit(c Config, m Share) bool {
 			if seen[override.DurationSeconds] || override.Limit < 0 || override.Limit > 1_000_000_000_000 {
 				return false
 			}
-			found := false
-			for _, condition := range c.Windows {
-				found = found || condition.DurationSeconds == override.DurationSeconds
-			}
-			if !found {
-				return false
-			}
 			seen[override.DurationSeconds] = true
 		}
 		return true
@@ -184,6 +181,13 @@ func normalize(c *Config) error {
 				return ErrInput
 			}
 			seen[condition.DurationSeconds] = true
+		}
+		for _, member := range c.Members {
+			for _, override := range member.WindowOverrides {
+				if !seen[override.DurationSeconds] {
+					return ErrUnknownWindowOverride
+				}
+			}
 		}
 	} else if len(c.Windows) > 0 {
 		return ErrInput
@@ -257,7 +261,7 @@ func (s *Service) Schemes(ctx context.Context) ([]Scheme, error) {
 	}
 	out := make([]Scheme, 0, len(rows))
 	for _, r := range rows {
-		v, err := readScheme(ctx, q, s.tenantID, r.ID, s.now().Unix())
+		v, err := readScheme(ctx, q, s.tenantID, r.ID, s.now().Unix(), s.location())
 		if err != nil {
 			return nil, err
 		}
@@ -265,7 +269,7 @@ func (s *Service) Schemes(ctx context.Context) ([]Scheme, error) {
 	}
 	return out, nil
 }
-func readScheme(ctx context.Context, q *db.Queries, tenantID, id, now int64) (Scheme, error) {
+func readScheme(ctx context.Context, q *db.Queries, tenantID, id, now int64, location *time.Location) (Scheme, error) {
 	r, err := q.GetTenantAllocationScheme(ctx, db.GetTenantAllocationSchemeParams{ID: id, TenantID: tenantID})
 	if err != nil {
 		return Scheme{}, ErrNotFound
@@ -274,6 +278,9 @@ func readScheme(ctx context.Context, q *db.Queries, tenantID, id, now int64) (Sc
 	out.Revision, err = Current(ctx, q, id, now)
 	if err != nil && !errors.Is(err, ErrUnavailable) {
 		return out, err
+	}
+	if err == nil {
+		out.EditEffectiveAt = nextEffective(out.Config, now, location, out.EffectiveAt)
 	}
 	next, e := q.NextAllocationRevision(ctx, db.NextAllocationRevisionParams{SchemeID: id, EffectiveAt: now})
 	if e == nil {
@@ -284,6 +291,7 @@ func readScheme(ctx context.Context, q *db.Queries, tenantID, id, now int64) (Sc
 		out.Next = &rev
 		if out.Revision.ID == 0 {
 			out.Revision = rev
+			out.EditEffectiveAt = rev.EffectiveAt
 		}
 	} else if !errors.Is(e, sql.ErrNoRows) {
 		return out, e
@@ -337,11 +345,25 @@ func (s *Service) SaveScheme(ctx context.Context, id int64, in SchemeInput) (Sch
 			return Scheme{}, ErrPoolConflict
 		}
 	}
-	if err = s.applyPrices(ctx, q, in.GroupID, &in.Config); err != nil {
+	var previousRates []Rate
+	if id != 0 {
+		previous, err := readScheme(ctx, q, s.tenantID, id, now, s.location())
+		if err != nil {
+			return Scheme{}, err
+		}
+		if previous.GroupID != in.GroupID {
+			return Scheme{}, ErrInput
+		}
+		previousRates = append(previousRates, previous.Config.Rates...)
+		if previous.Next != nil {
+			previousRates = append(previousRates, previous.Next.Config.Rates...)
+		}
+	}
+	if err = s.applyPrices(ctx, q, in.GroupID, &in.Config, previousRates); err != nil {
 		return Scheme{}, err
 	}
-	if normalize(&in.Config) != nil {
-		return Scheme{}, ErrInput
+	if err := normalize(&in.Config); err != nil {
+		return Scheme{}, err
 	}
 	effective := now
 	if id == 0 {
@@ -365,13 +387,6 @@ func (s *Service) SaveScheme(ctx context.Context, id int64, in SchemeInput) (Sch
 			effective = nextEffective(in.Config, now, s.location(), now)
 		}
 	} else {
-		old, err := q.GetTenantAllocationScheme(ctx, db.GetTenantAllocationSchemeParams{ID: id, TenantID: s.tenantID})
-		if err != nil {
-			return Scheme{}, ErrNotFound
-		}
-		if old.GroupID != in.GroupID {
-			return Scheme{}, ErrInput
-		}
 		if err = q.UpdateAllocationScheme(ctx, db.UpdateAllocationSchemeParams{ID: id, Name: in.Name, Enabled: bit(in.Enabled)}); err != nil {
 			return Scheme{}, err
 		}
@@ -401,25 +416,30 @@ func (s *Service) SaveScheme(ctx context.Context, id int64, in SchemeInput) (Sch
 	if err = audit.Record(ctx, q, "allocation.save", "allocation", audit.ID(id)); err != nil {
 		return Scheme{}, err
 	}
-	out, err := readScheme(ctx, q, s.tenantID, id, now)
+	out, err := readScheme(ctx, q, s.tenantID, id, now, s.location())
 	if err != nil {
 		return Scheme{}, err
 	}
 	return out, tx.Commit()
 }
 
-// Priced rules snapshot the current pool-supported models and catalog prices in each revision.
-// Submitted rates never override the catalog when a pricing service is available.
-func (s *Service) applyPrices(ctx context.Context, q *db.Queries, groupID int64, config *Config) error {
+// Priced revisions use the current catalog, then their previous saved rates when a price disappears.
+// Client-supplied rates never override catalog or previously saved prices in production.
+func (s *Service) applyPrices(ctx context.Context, q *db.Queries, groupID int64, config *Config, previous []Rate) error {
+	config.MissingPriceModels = nil
+	config.CatalogUnavailable = false
 	if config.Mode == "tokens" || config.Mode == "ratio" && config.RatioUnit == "tokens" {
 		config.Rates = []Rate{}
 		return nil
 	}
 	if s.pricing == nil {
 		if len(config.Rates) == 0 {
-			return ErrUnpriced
+			config.Rates = append([]Rate(nil), previous...)
 		}
-		return nil
+		if len(config.Rates) > 0 {
+			return nil
+		}
+		return ErrUnpriced
 	}
 	group, err := q.GetGroup(ctx, groupID)
 	if err != nil {
@@ -434,21 +454,32 @@ func (s *Service) applyPrices(ctx context.Context, q *db.Queries, groupID int64,
 	if err != nil {
 		return err
 	}
+	previousByModel := make(map[string]Rate, len(previous))
+	for _, rate := range previous {
+		previousByModel[rate.Model] = rate
+	}
 	models := map[string]bool{}
 	for _, row := range rows {
 		catalog, err := accounts.DecodeCatalog(row.ModelsSnapshot, row.ModelsRevision)
-		if err != nil {
-			return ErrUnpriced
+		if err != nil || catalog.UpdatedAt == 0 {
+			config.CatalogUnavailable = true
+			continue
 		}
 		for _, model := range catalog.Models {
 			_, native := groups.SplitModel(model)
+			// The policy needs the account provider to enforce provider-scoped allowlists.
 			if policy.Allows(row.Provider + "/" + native) {
 				models[native] = true
 			}
 		}
 	}
-	if len(models) == 0 {
-		return ErrUnpriced
+	// If a catalog is temporarily unknown, retain existing prices while its models cannot be rediscovered.
+	if config.CatalogUnavailable {
+		for model := range previousByModel {
+			if policy.Allows(model) {
+				models[model] = true
+			}
+		}
 	}
 	ids := make([]string, 0, len(models))
 	for model := range models {
@@ -457,11 +488,17 @@ func (s *Service) applyPrices(ctx context.Context, q *db.Queries, groupID int64,
 	sort.Strings(ids)
 	config.Rates = make([]Rate, 0, len(ids))
 	for _, model := range ids {
-		price, ok := s.pricing.Lookup(model)
-		if !ok {
-			return ErrUnpriced
+		if price, ok := s.pricing.Lookup(model); ok {
+			config.Rates = append(config.Rates, Rate{Model: model, Input: price.Input, Cached: price.Cached, Output: price.Output})
+			continue
 		}
-		config.Rates = append(config.Rates, Rate{Model: model, Input: price.Input, Cached: price.Cached, Output: price.Output})
+		config.MissingPriceModels = append(config.MissingPriceModels, model)
+		if rate, ok := previousByModel[model]; ok {
+			config.Rates = append(config.Rates, rate)
+		}
+	}
+	if len(config.Rates) == 0 {
+		return ErrUnpriced
 	}
 	return nil
 }

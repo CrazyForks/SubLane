@@ -62,6 +62,8 @@ export const zh: Record<keyof typeof en, string> = {
   allocationWindowFor: '{{name}} 的 {{duration}} 上限',
   allocationWindowDurationHint:
     '各窗口从规则生效时起，分别按自身时长重置。时间按 {{zone}} 显示，可能与上游额度重置不同。',
+  allocationFutureEditDelay:
+    '以后修改此规则，最长可能等待 {{duration}} 才生效，具体以当前最长窗口的下一边界为准。',
   allocationAutoPricingHint:
     '保存时会从所选账号池支持的模型中自动回填价格，无需在此填写。',
   allocationSave: '保存用量分配',
@@ -83,7 +85,7 @@ export const zh: Record<keyof typeof en, string> = {
   allocationExclusiveHint:
     '请使用专用账号池，并先将其账号从其他所有账号池移除。添加用量分配后，账号池及池内账号固定；该账号池原有的未绑定 Key 将停止工作。',
   allocationMembers: '成员分配',
-  allocationBlankHint: '留空表示不为该成员分配额度。',
+  allocationBlankHint: '先勾选要分配的成员，再为每位已选成员填写额度或比例。',
   allocationFor: '{{name}} 的额度',
   allocationTotal: '已分配 {{total}}% · 未分配 {{remaining}}%',
   allocationPeriod: '重置周期',
@@ -96,7 +98,7 @@ export const zh: Record<keyof typeof en, string> = {
   allocationWindowPendingHint:
     '本规则共有 {{pending}} 条待处理记录；每个窗口只计算落在自身时长内的记录。',
   allocationWindowBlankHint:
-    '选择可使用此分配的成员。统一值或个人上限的单项条件留空，表示该条件不限量。',
+    '只有已勾选的成员可使用此分配。统一或个人条件的金额留空，表示该项条件不限量。',
   allocationResetDay: '每月第几日',
   allocationResetTime: '重置时间',
   allocationResetZoneHint: '时间按实例时区（{{zone}}）计算。',
@@ -107,6 +109,15 @@ export const zh: Record<keyof typeof en, string> = {
   allocationEnabled: '启用此用量分配',
   allocationNextHint:
     '额度、价格、计量方式或重置时间的修改在下周期生效。暂停或启用访问立即生效，当前用量与待结算记录保留。',
+  allocationEditEffectivePreview:
+    '按当前周期计算，现在保存的修改预计于 {{date}} 生效；暂停或启用访问会立即生效。',
+  allocationStartEffectivePreview: '若现在保存，此规则预计于 {{date}} 开始。',
+  allocationMissingPrices:
+    '{{count}} 个可用模型缺少当前目录价格（{{models}}）。有历史价格时沿用旧价，否则这些模型的请求暂时无法使用此分配。',
+  allocationCatalogUnavailable:
+    '部分账号的模型目录暂不可用。有历史价格时会保留；请刷新账号模型以更新覆盖范围。',
+  allocationCurrentPricing: '当前版本的价格覆盖',
+  allocationScheduledPricing: '待生效版本的价格覆盖',
   allocationStartNext: '从下个周期开始',
   allocationImmediateHint:
     '立即生效：从生效时开始记录新请求的用量，不补记此前用量。',
@@ -132,7 +143,9 @@ export const zh: Record<keyof typeof en, string> = {
   allocationExhausted: '额度已耗尽',
   allocationUnavailable: '此用量分配已暂停、尚未生效或你已无权使用。',
   allocationUnpriced:
-    '账号池模型目录不可用，或包含缺少价格的模型。请刷新账号模型，或将账号池限制为有价格的模型后重试。',
+    '此账号池没有可用的模型价格。请刷新账号模型，或将账号池限制为有价格的模型后重试。',
+  allocationUnknownWindowOverride:
+    '某项个人上限引用了已不存在的时间窗口条件。请刷新规则后重试。',
   allocationRatioTokensBalanceHint:
     '每个窗口的 Token 上限＝该窗口总预算 × 分配比例。这是内部额度，订阅账号的上游额度可能先耗尽。',
   allocationRatioAmountBalanceHint:

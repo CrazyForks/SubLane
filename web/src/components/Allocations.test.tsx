@@ -4,6 +4,7 @@ import { expect, it, vi } from 'vitest'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useState } from 'react'
 import { SchemeForm } from './SchemeForm'
+import { AllocationPriceWarning } from './AllocationPriceWarning'
 import { parseAllocationValue } from '@/lib/allocations'
 
 it('groups the allowance form and keeps activation outside optional pricing', () => {
@@ -111,6 +112,128 @@ it('uses pool model prices automatically without price inputs in the allowance f
   expect(submit.mock.calls[0][0].config.rates).toEqual([])
 })
 
+it('shows the server-calculated effective date before editing a long window', () => {
+  render(
+    <SchemeForm
+      groups={[{ id: 2, name: 'Synthetic pool', enabled: true }]}
+      groupID={2}
+      onGroupChange={() => {}}
+      members={[{ id: 7, username: 'synthetic-member' }]}
+      scheme={{
+        id: 1,
+        name: 'Synthetic long window',
+        group_id: 2,
+        group_name: 'Synthetic pool',
+        enabled: true,
+        created_at: 1,
+        effective_at: 1,
+        edit_effective_at: 1_896_048_000,
+        next: null,
+        config: {
+          mode: 'windows',
+          period: 'durations',
+          windows: [{ duration_seconds: 30 * 86400, limit: 1_000_000 }],
+          members: [{ user_id: 7, limit: 0 }],
+          rates: [],
+        },
+      }}
+      onSubmit={() => {}}
+      onCancel={() => {}}
+      pending={false}
+    />,
+  )
+  const preview = screen.getByText(
+    /changes saved now are expected to take effect on/,
+  )
+  expect(preview.textContent).toContain('2030')
+})
+
+it('updates the scheduled-start preview as the longest new window changes', () => {
+  const clock = vi.spyOn(Date, 'now').mockReturnValue(Date.UTC(2030, 0, 1))
+  try {
+    render(
+      <SchemeForm
+        groups={[{ id: 2, name: 'Synthetic pool', enabled: true }]}
+        groupID={2}
+        onGroupChange={() => {}}
+        members={[{ id: 7, username: 'synthetic-member' }]}
+        onSubmit={() => {}}
+        onCancel={() => {}}
+        pending={false}
+      />,
+    )
+    fireEvent.click(screen.getByLabelText('By time window'))
+    fireEvent.click(screen.getByRole('button', { name: 'Add condition' }))
+    fireEvent.change(screen.getByLabelText('Duration for condition 1'), {
+      target: { value: '30' },
+    })
+    fireEvent.change(screen.getByLabelText('Unit for condition 1'), {
+      target: { value: 'days' },
+    })
+    fireEvent.click(screen.getByLabelText('Start next period'))
+    expect(
+      screen.getByText(/If saved now, this rule is expected to start/)
+        .textContent,
+    ).toContain('2030')
+    fireEvent.change(screen.getByLabelText('Duration for condition 1'), {
+      target: { value: '365' },
+    })
+    expect(
+      screen.getByText(/If saved now, this rule is expected to start/)
+        .textContent,
+    ).toContain('2031')
+  } finally {
+    clock.mockRestore()
+  }
+})
+
+it('shows the future edit delay while configuring a time window', () => {
+  render(
+    <SchemeForm
+      groups={[{ id: 2, name: 'Synthetic pool', enabled: true }]}
+      groupID={2}
+      onGroupChange={() => {}}
+      members={[{ id: 7, username: 'synthetic-member' }]}
+      onSubmit={() => {}}
+      onCancel={() => {}}
+      pending={false}
+    />,
+  )
+  fireEvent.click(screen.getByLabelText('By time window'))
+  fireEvent.click(screen.getByRole('button', { name: 'Add condition' }))
+  fireEvent.change(screen.getByLabelText('Duration for condition 1'), {
+    target: { value: '30' },
+  })
+  fireEvent.change(screen.getByLabelText('Unit for condition 1'), {
+    target: { value: 'days' },
+  })
+  expect(screen.getByText(/Future edits may wait up to 30 days/)).toBeTruthy()
+})
+
+it('explains missing catalog prices while retaining usable model prices', () => {
+  render(
+    <AllocationPriceWarning
+      config={{
+        mode: 'amount',
+        period: 'day',
+        members: [{ user_id: 7, limit: 1_000_000 }],
+        rates: [
+          {
+            model: 'synthetic-priced',
+            input: 1_000_000,
+            cached: 0,
+            output: 2_000_000,
+          },
+        ],
+        missing_price_models: ['synthetic-new'],
+        catalog_unavailable: true,
+      }}
+    />,
+  )
+  expect(screen.getByText(/synthetic-new/)).toBeTruthy()
+  expect(screen.getByText(/Saved prices are retained/)).toBeTruthy()
+})
+
 it('adds custom hour and day windows with one personal override', async () => {
   const user = userEvent.setup()
   const submit = mountModelPrices('synthetic-basic', [
@@ -161,6 +284,47 @@ it('adds custom hour and day windows with one personal override', async () => {
       rates: [],
     }),
   )
+})
+
+it('omits an override when its time-window condition is removed', async () => {
+  const user = userEvent.setup()
+  const submit = mountModelPrices()
+  await user.type(
+    screen.getByLabelText('Resource allowance name'),
+    'Synthetic conditions',
+  )
+  await user.click(screen.getByLabelText('By time window'))
+  await user.click(screen.getByRole('button', { name: 'Add condition' }))
+  await user.click(screen.getByRole('button', { name: 'Add condition' }))
+  await user.type(screen.getByLabelText('Duration for condition 1'), '5')
+  await user.type(screen.getByLabelText('Shared limit for condition 1'), '1')
+  await user.type(screen.getByLabelText('Duration for condition 2'), '7')
+  await user.selectOptions(
+    screen.getByLabelText('Unit for condition 2'),
+    'days',
+  )
+  await user.type(screen.getByLabelText('Shared limit for condition 2'), '2')
+  await user.click(screen.getByLabelText('Include synthetic-member'))
+  await user.click(
+    screen.getByLabelText('Override limits for synthetic-member'),
+  )
+  await user.click(
+    screen.getByLabelText('Override 5 hours for synthetic-member'),
+  )
+  await user.type(
+    screen.getByLabelText('5 hours limit for synthetic-member'),
+    '3',
+  )
+  await user.click(screen.getByRole('button', { name: 'Remove condition 1' }))
+  await user.click(
+    screen.getByRole('button', { name: 'Save resource allowance' }),
+  )
+  expect(submit.mock.calls[0][0].config.windows).toEqual([
+    { duration_seconds: 7 * 86400, limit: 2_000_000 },
+  ])
+  expect(submit.mock.calls[0][0].config.members).toEqual([
+    { user_id: 2, limit: 0 },
+  ])
 })
 
 it('assigns a pool allowance directly to its granted members', async () => {

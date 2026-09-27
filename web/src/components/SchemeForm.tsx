@@ -1,5 +1,5 @@
 import { useRef, useState, type FormEvent } from 'react'
-import { useTimeZone } from '@/lib/timezone'
+import { formatInstanceDate, useTimeZone } from '@/lib/timezone'
 import { useTranslation } from 'react-i18next'
 import { ChevronDown } from 'lucide-react'
 import {
@@ -12,6 +12,7 @@ import {
 } from '@/lib/allocations'
 import { Button } from './ui/Button'
 import { Input } from './ui/Input'
+import { AllocationPriceWarning } from './AllocationPriceWarning'
 
 import {
   DropdownMenu,
@@ -105,7 +106,7 @@ export function SchemeForm({
   onCancel: () => void
   pending: boolean
 }) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const timeZone = useTimeZone()
   const initial = scheme?.next?.config ?? scheme?.config
   const [name, setName] = useState(scheme?.name ?? '')
@@ -140,6 +141,7 @@ export function SchemeForm({
   )
   const nextRuleID = useRef(0)
   const [startNext, setStartNext] = useState(false)
+  const [previewAnchor] = useState(() => Math.floor(Date.now() / 1000))
   const [values, setValues] = useState<Record<number, string>>(
     Object.fromEntries(
       initial?.members.map((m) => [
@@ -203,6 +205,23 @@ export function SchemeForm({
   const selectedCount = members.filter(
     (member) => selectedMembers[member.id],
   ).length
+  const longestDraftWindow = Math.max(
+    0,
+    ...windowRules.map((rule) => durationSeconds(rule) ?? 0),
+  )
+  const effectivePreview = scheme
+    ? (scheme.edit_effective_at ?? 0)
+    : startNext && mode === 'windows' && longestDraftWindow > 0
+      ? previewAnchor + longestDraftWindow
+      : 0
+  const effectivePreviewDate = effectivePreview
+    ? formatInstanceDate(
+        effectivePreview * 1000,
+        i18n.resolvedLanguage ?? 'en',
+        timeZone,
+        { dateStyle: 'medium', timeStyle: 'short' },
+      )
+    : ''
   const changeMode = (next: AllocationMode) => {
     if (next !== mode) {
       setMode(next)
@@ -665,6 +684,23 @@ export function SchemeForm({
                 : t('allocationResetZoneHint', { zone: timeZone })}{' '}
               {period === 'month' && t('allocationResetShortMonthHint')}
             </p>
+            {mode === 'windows' && longestDraftWindow > 0 && (
+              <p className="text-sm leading-6 text-warning sm:col-span-2">
+                {t('allocationFutureEditDelay', {
+                  duration: t(
+                    longestDraftWindow % 86400 === 0
+                      ? 'allocationDurationDays'
+                      : 'allocationDurationHours',
+                    {
+                      value:
+                        longestDraftWindow % 86400 === 0
+                          ? longestDraftWindow / 86400
+                          : longestDraftWindow / 3600,
+                    },
+                  ),
+                })}
+              </p>
+            )}
             {shareMode && (
               <p className="text-sm leading-6 text-muted-foreground sm:col-span-2">
                 {t(
@@ -682,6 +718,7 @@ export function SchemeForm({
               {t('allocationAutoPricingHint')}
             </p>
           )}
+          {initial && <AllocationPriceWarning config={initial} />}
         </section>
         <section className="space-y-4 border-t border-border pt-7">
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -944,6 +981,16 @@ export function SchemeForm({
           {scheme && (
             <p className="text-sm leading-6 text-muted-foreground">
               {t('allocationNextHint')}
+            </p>
+          )}
+          {effectivePreviewDate && (
+            <p role="status" className="text-sm leading-6 text-warning">
+              {t(
+                scheme
+                  ? 'allocationEditEffectivePreview'
+                  : 'allocationStartEffectivePreview',
+                { date: effectivePreviewDate },
+              )}
             </p>
           )}
           <div className="space-y-3">

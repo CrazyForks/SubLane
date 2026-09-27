@@ -34,6 +34,8 @@ const configSchema = z.object({
     )
     .max(100),
   rates: z.array(rateSchema).max(4096),
+  missing_price_models: z.array(z.string()).max(4096).optional(),
+  catalog_unavailable: z.boolean().optional(),
   ratio_unit: unitSchema.optional(),
   windows: z.array(windowConditionSchema).max(8).optional(),
   total: integer.optional(),
@@ -46,6 +48,7 @@ export const schemeSchema = revisionSchema.extend({
   group_name: z.string(),
   enabled: z.boolean(),
   created_at: integer,
+  edit_effective_at: integer.optional(),
   next: revisionSchema.nullable(),
 })
 const balanceSchema = z.object({
@@ -178,6 +181,8 @@ export function allocationErrorKey(error: Error) {
     )
       return 'allocationPoolConflict'
     if (error.code === 'invalid_allocation_input') return 'allocationInvalid'
+    if (error.code === 'allocation_unknown_window_override')
+      return 'allocationUnknownWindowOverride'
     if (error.code === 'invalid_allocation_settlement')
       return 'allocationSettlementConflict'
     if (error.code === 'allocation_model_unpriced') return 'allocationUnpriced'
