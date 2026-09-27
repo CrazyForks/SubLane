@@ -50,13 +50,13 @@ func allocationError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, allocations.ErrInput):
 		status, code = 400, err.Error()
+	case errors.Is(err, allocations.ErrUnknownWindowOverride):
+		status, code = 400, err.Error()
 	case errors.Is(err, allocations.ErrNotFound):
 		status, code = 404, err.Error()
 	case errors.Is(err, allocations.ErrUnavailable):
 		status, code = 403, err.Error()
-	case errors.Is(err, allocations.ErrPoolConflict), errors.Is(err, allocations.ErrSettlement), errors.Is(err, allocations.ErrPending), errors.Is(err, allocations.ErrSync), errors.Is(err, allocations.ErrUnpriced):
-		status, code = 409, err.Error()
-	case errors.Is(err, allocations.ErrSnapshot):
+	case errors.Is(err, allocations.ErrPoolConflict), errors.Is(err, allocations.ErrSettlement), errors.Is(err, allocations.ErrPending), errors.Is(err, allocations.ErrUnpriced):
 		status, code = 409, err.Error()
 	}
 	writeJSON(w, status, map[string]string{"error": code})
@@ -74,9 +74,7 @@ func (h *allocationHTTP) register(r chi.Router) {
 		}
 		h.save(w, r, id)
 	})
-	r.Post("/{id}/refresh", h.refresh)
 	r.Post("/{id}/settle", h.settle)
-	r.Post("/{id}/reserve", h.reserve)
 	r.Post("/{id}/enabled", h.enabled)
 }
 func (h *allocationHTTP) list(w http.ResponseWriter, r *http.Request) {
@@ -136,25 +134,6 @@ func (h *allocationHTTP) own(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 200, map[string]any{"schemes": values})
 }
-func (h *allocationHTTP) refresh(w http.ResponseWriter, r *http.Request) {
-	if !h.available(w, r) {
-		return
-	}
-	id, err := pathID(r)
-	if err != nil || id <= 0 {
-		allocationError(w, allocations.ErrInput)
-		return
-	}
-	var in struct{}
-	if !decodeJSON(w, r, &in) {
-		return
-	}
-	if err = h.gateway.RefreshAllocation(r.Context(), id); err != nil {
-		allocationError(w, err)
-		return
-	}
-	h.detail(w, r)
-}
 func (h *allocationHTTP) settle(w http.ResponseWriter, r *http.Request) {
 	if !h.available(w, r) {
 		return
@@ -165,11 +144,10 @@ func (h *allocationHTTP) settle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in struct {
-		RequestID string          `json:"request_id"`
-		Input     *int64          `json:"input"`
-		Output    *int64          `json:"output"`
-		Cached    *int64          `json:"cached"`
-		Points    map[int64]int64 `json:"points"`
+		RequestID string `json:"request_id"`
+		Input     *int64 `json:"input"`
+		Output    *int64 `json:"output"`
+		Cached    *int64 `json:"cached"`
 	}
 	if !decodeJSON(w, r, &in) {
 		return
@@ -178,35 +156,13 @@ func (h *allocationHTTP) settle(w http.ResponseWriter, r *http.Request) {
 		allocationError(w, allocations.ErrInput)
 		return
 	}
-	err = h.gateway.Allocations().Settle(r.Context(), id, in.RequestID, allocations.Completion{Input: *in.Input, Output: *in.Output, Cached: *in.Cached}, in.Points)
+	err = h.gateway.Allocations().Settle(r.Context(), id, in.RequestID, allocations.Completion{Input: *in.Input, Output: *in.Output, Cached: *in.Cached})
 	if err != nil {
 		allocationError(w, err)
 		return
 	}
 	w.WriteHeader(204)
 }
-func (h *allocationHTTP) reserve(w http.ResponseWriter, r *http.Request) {
-	if !h.available(w, r) {
-		return
-	}
-	id, err := pathID(r)
-	if err != nil || id <= 0 {
-		allocationError(w, allocations.ErrInput)
-		return
-	}
-	var in struct {
-		Points int64 `json:"points"`
-	}
-	if !decodeJSON(w, r, &in) {
-		return
-	}
-	if err = h.gateway.Allocations().ReserveUnassigned(r.Context(), id, in.Points); err != nil {
-		allocationError(w, err)
-		return
-	}
-	w.WriteHeader(204)
-}
-
 func (h *allocationHTTP) enabled(w http.ResponseWriter, r *http.Request) {
 	if !h.available(w, r) {
 		return

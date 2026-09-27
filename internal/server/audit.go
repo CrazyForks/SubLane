@@ -112,9 +112,6 @@ func auditTarget(r *http.Request) (string, string, string) {
 			if r.Method == "POST" && tail == "settle" {
 				action, resource = "allocation.settle", "allocation"
 			}
-			if r.Method == "POST" && tail == "reserve" {
-				action, resource = "allocation.reconcile", "allocation"
-			}
 		case "keys":
 			resource = "key"
 			if tail == "" && r.Method == "PATCH" {

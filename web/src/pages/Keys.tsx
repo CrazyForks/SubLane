@@ -13,6 +13,7 @@ import { RevokeKey } from '@/components/RevokeKey'
 import { EditKey } from '@/components/EditKey'
 import { Status } from '@/components/Status'
 import { Button } from '@/components/ui/Button'
+import { formatInstanceDate, useTimeZone } from '@/lib/timezone'
 
 export function Keys() {
   const { data } = useQuery(authOptions())
@@ -23,6 +24,7 @@ export function Keys() {
 
 function KeyManager({ userID }: { userID: number }) {
   const { t, i18n } = useTranslation()
+  const timeZone = useTimeZone()
   const client = useQueryClient()
   const heading = useRef<HTMLHeadingElement>(null)
   const [cursors, setCursors] = useState([0])
@@ -41,6 +43,7 @@ function KeyManager({ userID }: { userID: number }) {
     return client.invalidateQueries({ queryKey: ['keys', userID] })
   }
   const dates = new Intl.DateTimeFormat(i18n.resolvedLanguage ?? 'en', {
+    timeZone,
     dateStyle: 'medium',
   })
   return (
@@ -162,8 +165,11 @@ function KeyManager({ userID }: { userID: number }) {
                       title={
                         key.expires_at === null
                           ? undefined
-                          : new Date(key.expires_at * 1000).toLocaleString(
-                              i18n.resolvedLanguage,
+                          : formatInstanceDate(
+                              key.expires_at * 1000,
+                              i18n.resolvedLanguage ?? 'en',
+                              timeZone,
+                              { dateStyle: 'short', timeStyle: 'medium' },
                             )
                       }
                     >

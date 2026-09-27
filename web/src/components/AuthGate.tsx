@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next'
 import { authOptions } from '@/lib/auth'
 import { canAccess } from '@/lib/access'
 import { selectedWorkspace } from '@/lib/workspace'
+import { TimeZoneContext } from '@/lib/timezone'
 import { Forbidden } from '@/pages/Forbidden'
 import { AuthShell } from './AuthShell'
 import { WorkspaceChooser } from './WorkspaceChooser'
@@ -65,9 +66,15 @@ export function AuthGate() {
     )
   )
     return (
-      <Layout>
-        <Forbidden />
-      </Layout>
+      <TimeZoneContext.Provider value={query.data.time_zone}>
+        <Layout>
+          <Forbidden />
+        </Layout>
+      </TimeZoneContext.Provider>
     )
-  return <Layout />
+  return (
+    <TimeZoneContext.Provider value={query.data.time_zone}>
+      <Layout />
+    </TimeZoneContext.Provider>
+  )
 }

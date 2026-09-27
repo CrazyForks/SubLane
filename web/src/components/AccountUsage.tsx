@@ -5,9 +5,11 @@ import { useTranslation } from 'react-i18next'
 import { refreshUsage, usageOptions, type UsageWindow } from '@/lib/usage'
 import { cn } from '@/lib/cn'
 import { Button } from './ui/Button'
+import { useTimeZone } from '@/lib/timezone'
 
 export function AccountUsage({ id, name }: { id: string; name: string }) {
   const { t, i18n } = useTranslation()
+  const timeZone = useTimeZone()
   const client = useQueryClient()
   const query = useQuery(usageOptions(id))
   const refresh = useMutation({
@@ -118,6 +120,7 @@ export function AccountUsage({ id, name }: { id: string; name: string }) {
           >
             {t('usageUpdated', {
               time: new Intl.DateTimeFormat(locale, {
+                timeZone,
                 dateStyle: 'short',
                 timeStyle: 'short',
               }).format(query.data.updated_at * 1000),
@@ -157,6 +160,7 @@ export function AccountUsage({ id, name }: { id: string; name: string }) {
 
 function QuotaWindow({ window, now }: { window: UsageWindow; now: number }) {
   const { t, i18n } = useTranslation()
+  const timeZone = useTimeZone()
   const locale = i18n.resolvedLanguage ?? 'en'
   const seconds = window.window_seconds
   const label =
@@ -240,6 +244,7 @@ function QuotaWindow({ window, now }: { window: UsageWindow; now: number }) {
           window.reset_at === null
             ? undefined
             : new Intl.DateTimeFormat(locale, {
+                timeZone,
                 dateStyle: 'medium',
                 timeStyle: 'short',
               }).format(window.reset_at * 1000)

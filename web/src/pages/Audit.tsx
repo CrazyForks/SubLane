@@ -20,6 +20,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/DropdownMenu'
 
+import { useTimeZone } from '@/lib/timezone'
 export function Audit() {
   const { data } = useQuery(authOptions())
   if (data?.user?.role !== 'admin') return null
@@ -27,6 +28,7 @@ export function Audit() {
 }
 function AuditLog() {
   const { t, i18n } = useTranslation()
+  const timeZone = useTimeZone()
   const [cursors, setCursors] = useState([0])
   const [resource, setResource] = useState<AuditResource>('')
   const [outcome, setOutcome] = useState<AuditOutcome>('')
@@ -34,6 +36,7 @@ function AuditLog() {
     auditOptions(cursors[cursors.length - 1], resource, outcome),
   )
   const dates = new Intl.DateTimeFormat(i18n.resolvedLanguage ?? 'en', {
+    timeZone,
     dateStyle: 'short',
     timeStyle: 'medium',
   })

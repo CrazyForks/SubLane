@@ -63,7 +63,7 @@ func NewForTenant(connection *sql.DB, tenantID int64) *Service {
 }
 
 var actions = map[string]string{
-	"allocation.save": "allocation", "allocation.settle": "allocation", "allocation.reconcile": "allocation",
+	"allocation.save": "allocation", "allocation.settle": "allocation", "allocation.reconcile": "allocation", "allocation.delete": "allocation",
 	"backup.export": "backup", "backup.prepare": "backup", "backup.verify": "backup",
 	"settings.update": "settings",
 	"key.reveal":      "key", "key.create": "key", "key.update": "key", "key.revoke": "key",
@@ -89,7 +89,7 @@ func ValidTarget(action, resource, id string) bool {
 		return accountID.MatchString(id)
 	}
 	if resource == "settings" {
-		return id == "codex"
+		return id == "codex" || id == "timezone"
 	}
 	return numericID.MatchString(id)
 }

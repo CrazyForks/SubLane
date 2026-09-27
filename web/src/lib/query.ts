@@ -7,7 +7,11 @@ export { replaceAuthState } from './auth'
 export function createQueryClient() {
   const onError = (error: Error) => {
     if (error instanceof ApiError && error.code === 'unauthorized') {
-      return replaceAuthState(client, { initialized: true, user: null })
+      return replaceAuthState(client, {
+        initialized: true,
+        time_zone: 'UTC',
+        user: null,
+      })
     }
   }
   const client: QueryClient = new QueryClient({

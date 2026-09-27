@@ -164,13 +164,13 @@ func TestFormerProxyCheckArchiveStillRestores(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	info := Info{CreatedAt: time.Now().UTC().Truncate(time.Second), Version: "synthetic-version", SchemaVersion: 4, DatabaseBytes: stat.Size()}
+	info := Info{CreatedAt: time.Now().UTC().Truncate(time.Second), Version: "synthetic-version", SchemaVersion: 5, DatabaseBytes: stat.Size()}
 	archive := filepath.Join(t.TempDir(), "former-proxy.sublane-backup.tar.gz")
 	if err := writeArchive(ctx, source, archive, info); err != nil {
 		t.Fatal(err)
 	}
 	verified, err := Verify(ctx, archive)
-	if err != nil || verified.SchemaVersion != 4 {
+	if err != nil || verified.SchemaVersion != 5 {
 		t.Fatalf("former archive verification: %+v %v", verified, err)
 	}
 	target := filepath.Join(t.TempDir(), "restored")
@@ -183,7 +183,7 @@ func TestFormerProxyCheckArchiveStillRestores(t *testing.T) {
 	}
 	defer restored.Close()
 	var migrationCount int
-	if err := restored.QueryRowContext(ctx, "SELECT count(*) FROM schema_migrations").Scan(&migrationCount); err != nil || migrationCount != 3 {
+	if err := restored.QueryRowContext(ctx, "SELECT count(*) FROM schema_migrations").Scan(&migrationCount); err != nil || migrationCount != 4 {
 		t.Fatalf("restored migration history: %d %v", migrationCount, err)
 	}
 	restoredVault, err := vault.Open(filepath.Join(target, keyName), false)

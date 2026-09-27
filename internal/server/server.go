@@ -19,6 +19,7 @@ import (
 	"github.com/murongg/SubLane/internal/groups"
 	"github.com/murongg/SubLane/internal/oauth"
 	"github.com/murongg/SubLane/internal/tenants"
+	"github.com/murongg/SubLane/internal/timezone"
 	"github.com/murongg/SubLane/internal/upstream"
 	"github.com/murongg/SubLane/internal/versions"
 )
@@ -40,6 +41,7 @@ type Options struct {
 	TenantID      int64
 	PublicURL     string
 	CodexVersions *versions.Service
+	TimeZone      *timezone.Service
 	ProxyCheck    func(context.Context, string) (upstream.ProxyCheck, error)
 }
 
@@ -55,7 +57,7 @@ func New(o Options) http.Handler {
 	if tenantID == 0 {
 		tenantID = 1
 	}
-	login := &authHTTP{audit: o.Audit, service: o.Auth, tenants: o.Tenants, tenantID: tenantID, publicURL: o.PublicURL, limiter: newLoginLimiter()}
+	login := &authHTTP{audit: o.Audit, service: o.Auth, tenants: o.Tenants, timeZone: o.TimeZone, tenantID: tenantID, publicURL: o.PublicURL, limiter: newLoginLimiter()}
 	keys := &keyHTTP{groups: o.Groups, service: o.Keys, gateway: o.Gateway, publicURL: o.PublicURL, sockets: make(chan struct{}, 8)}
 	accountManagement := &accountHTTP{service: o.Accounts, oauth: o.OAuth, gateway: o.Gateway}
 	memberManagement := &memberHTTP{gateway: o.Gateway}
@@ -172,6 +174,10 @@ func New(o Options) http.Handler {
 		management.Route("/settings/codex", func(settings chi.Router) {
 			settings.Use(requirePlatformAdmin(tenantID))
 			(&versionHTTP{service: o.CodexVersions}).register(settings)
+		})
+		management.Route("/settings/timezone", func(settings chi.Router) {
+			settings.Use(requirePlatformAdmin(tenantID))
+			(&timeZoneHTTP{service: o.TimeZone}).register(settings)
 		})
 		management.Route("/accounts", accountManagement.register)
 		management.Route("/proxies", (&proxyHTTP{service: o.Accounts, check: o.ProxyCheck}).register)

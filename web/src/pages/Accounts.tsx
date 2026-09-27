@@ -41,8 +41,10 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/DropdownMenu'
 
+import { useTimeZone } from '@/lib/timezone'
 export function Accounts() {
   const { t, i18n } = useTranslation()
+  const timeZone = useTimeZone()
   const client = useQueryClient()
   const query = useQuery(accountOptions)
   const proxies = useQuery({
@@ -85,6 +87,7 @@ export function Accounts() {
   })
   const pending = update.isPending || check.isPending
   const dates = new Intl.DateTimeFormat(i18n.resolvedLanguage ?? 'en', {
+    timeZone,
     dateStyle: 'medium',
     timeStyle: 'short',
   })

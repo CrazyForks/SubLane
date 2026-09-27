@@ -52,6 +52,23 @@ func TestManagementAuditIsScopedToWorkspace(t *testing.T) {
 	}
 }
 
+func TestAllocationDeletionAuditRecordsItsAction(t *testing.T) {
+	ctx := WithActor(context.Background(), Actor{TenantID: 1, ID: 1, Username: "synthetic-admin", Role: "admin", Source: "local"})
+	connection, err := storage.Open(ctx, filepath.Join(t.TempDir(), "synthetic.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connection.Close()
+	seedAuditTenant(t, connection, 1)
+	if err := Record(ctx, db.New(connection), "allocation.delete", "allocation", "7"); err != nil {
+		t.Fatal(err)
+	}
+	page, err := New(connection).List(ctx, Filter{Resource: "allocation"})
+	if err != nil || len(page.Events) != 1 || page.Events[0].Action != "allocation.delete" {
+		t.Fatal(page, err)
+	}
+}
+
 func TestProxyAuditCanBeFiltered(t *testing.T) {
 	ctx := WithActor(context.Background(), Actor{TenantID: 1, ID: 1, Username: "synthetic-admin", Role: "admin", Source: "user"})
 	connection, err := storage.Open(ctx, filepath.Join(t.TempDir(), "audit.db"))

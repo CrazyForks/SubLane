@@ -51,6 +51,14 @@ const routes = root.addChildren([
     }),
     createRoute({
       getParentRoute: () => settings,
+      path: 'timezone',
+      component: lazyRouteComponent(
+        () => import('@/pages/System'),
+        'TimeZonePage',
+      ),
+    }),
+    createRoute({
+      getParentRoute: () => settings,
       path: 'codex',
       component: lazyRouteComponent(
         () => import('@/pages/System'),

@@ -177,18 +177,21 @@ func ValidateSnapshot(ctx context.Context, connection *sql.DB) (int, error) {
 		return 0, err
 	}
 	version := 0
+	cursor := 0
 	formerProxyHistory := false
+	// The retired proxy migration counts in archive metadata but not in the current migration prefix.
 	for rows.Next() {
 		var name string
 		if err := rows.Scan(&name); err != nil {
 			rows.Close()
 			return 0, err
 		}
-		if version < len(entries) && entries[version].Name() == name {
+		if cursor < len(entries) && entries[cursor].Name() == name {
+			cursor++
 			version++
 			continue
 		}
-		if len(entries) >= 3 && version == 3 && name == formerProxyChecksMigration {
+		if cursor >= 3 && !formerProxyHistory && name == formerProxyChecksMigration {
 			formerProxyHistory = true
 			version++
 			continue

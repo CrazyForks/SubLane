@@ -20,82 +20,38 @@ func (q *Queries) AccountHasAllocation(ctx context.Context, accountID string) (b
 	return exists, err
 }
 
-const addAllocationWindowMember = `-- name: AddAllocationWindowMember :exec
-INSERT INTO allocation_window_members(window_id,user_id,allowance) VALUES(?,?,?)
+const allocationMemberExposure = `-- name: AllocationMemberExposure :one
+SELECT CAST(COALESCE(SUM(CASE WHEN state='active' THEN 1 ELSE 0 END),0) AS INTEGER) AS active,
+CAST(COALESCE(SUM(CASE WHEN state='pending' THEN 1 ELSE 0 END),0) AS INTEGER) AS pending
+FROM allocation_entries WHERE scheme_id=?1 AND user_id=?2
+AND started_at>=?3 AND started_at<?4
+AND mode=?5 AND state IN ('active','pending')
 `
 
-type AddAllocationWindowMemberParams struct {
-	WindowID  int64
-	UserID    int64
-	Allowance int64
+type AllocationMemberExposureParams struct {
+	SchemeID    int64
+	UserID      int64
+	StartedFrom int64
+	StartedTo   int64
+	Mode        string
 }
 
-func (q *Queries) AddAllocationWindowMember(ctx context.Context, arg AddAllocationWindowMemberParams) error {
-	_, err := q.db.ExecContext(ctx, addAllocationWindowMember, arg.WindowID, arg.UserID, arg.Allowance)
-	return err
+type AllocationMemberExposureRow struct {
+	Active  int64
+	Pending int64
 }
 
-const advanceManualAllocationWindow = `-- name: AdvanceManualAllocationWindow :exec
-UPDATE allocation_windows SET observed_points=observed_points+? WHERE id=?
-`
-
-type AdvanceManualAllocationWindowParams struct {
-	ObservedPoints int64
-	ID             int64
-}
-
-func (q *Queries) AdvanceManualAllocationWindow(ctx context.Context, arg AdvanceManualAllocationWindowParams) error {
-	_, err := q.db.ExecContext(ctx, advanceManualAllocationWindow, arg.ObservedPoints, arg.ID)
-	return err
-}
-
-const allocationAccountAwaiting = `-- name: AllocationAccountAwaiting :one
-SELECT count(*) AS count, CAST(COALESCE(min(finished_at),0) AS INTEGER) AS oldest
-FROM allocation_entries WHERE scheme_id=? AND account_id=? AND state='observed'
-`
-
-type AllocationAccountAwaitingParams struct {
-	SchemeID  int64
-	AccountID string
-}
-
-type AllocationAccountAwaitingRow struct {
-	Count  int64
-	Oldest int64
-}
-
-func (q *Queries) AllocationAccountAwaiting(ctx context.Context, arg AllocationAccountAwaitingParams) (AllocationAccountAwaitingRow, error) {
-	row := q.db.QueryRowContext(ctx, allocationAccountAwaiting, arg.SchemeID, arg.AccountID)
-	var i AllocationAccountAwaitingRow
-	err := row.Scan(&i.Count, &i.Oldest)
+func (q *Queries) AllocationMemberExposure(ctx context.Context, arg AllocationMemberExposureParams) (AllocationMemberExposureRow, error) {
+	row := q.db.QueryRowContext(ctx, allocationMemberExposure,
+		arg.SchemeID,
+		arg.UserID,
+		arg.StartedFrom,
+		arg.StartedTo,
+		arg.Mode,
+	)
+	var i AllocationMemberExposureRow
+	err := row.Scan(&i.Active, &i.Pending)
 	return i, err
-}
-
-const allocationAccountObserved = `-- name: AllocationAccountObserved :one
-SELECT count(*) FROM allocation_entries WHERE scheme_id=? AND account_id=? AND state IN ('active','observed')
-`
-
-type AllocationAccountObservedParams struct {
-	SchemeID  int64
-	AccountID string
-}
-
-func (q *Queries) AllocationAccountObserved(ctx context.Context, arg AllocationAccountObservedParams) (int64, error) {
-	row := q.db.QueryRowContext(ctx, allocationAccountObserved, arg.SchemeID, arg.AccountID)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
-const allocationAccountUnfinished = `-- name: AllocationAccountUnfinished :one
-SELECT count(*) FROM allocation_entries WHERE account_id=? AND state IN ('active','pending')
-`
-
-func (q *Queries) AllocationAccountUnfinished(ctx context.Context, accountID string) (int64, error) {
-	row := q.db.QueryRowContext(ctx, allocationAccountUnfinished, accountID)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
 }
 
 const allocationMemberPending = `-- name: AllocationMemberPending :one
@@ -114,34 +70,17 @@ func (q *Queries) AllocationMemberPending(ctx context.Context, arg AllocationMem
 	return count, err
 }
 
-const allocationMemberUnresolved = `-- name: AllocationMemberUnresolved :one
-SELECT count(*) FROM allocation_entries e WHERE e.scheme_id=? AND e.user_id=? AND (e.state='pending'
-OR (e.state='observed' AND EXISTS(SELECT 1 FROM allocation_debits d JOIN allocation_windows w ON w.id=d.window_id
-WHERE d.request_id=e.request_id AND d.reconciled=0 AND w.reset_at<=?)))
-`
-
-type AllocationMemberUnresolvedParams struct {
-	SchemeID int64
-	UserID   int64
-	ResetAt  int64
-}
-
-func (q *Queries) AllocationMemberUnresolved(ctx context.Context, arg AllocationMemberUnresolvedParams) (int64, error) {
-	row := q.db.QueryRowContext(ctx, allocationMemberUnresolved, arg.SchemeID, arg.UserID, arg.ResetAt)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
 const allocationMemberUsage = `-- name: AllocationMemberUsage :one
 SELECT CAST(COALESCE(sum(cost),0) AS INTEGER) AS used,CAST(COALESCE(sum(input_tokens+output_tokens),0) AS INTEGER) AS tokens
-FROM allocation_entries WHERE scheme_id=? AND user_id=? AND window_start=? AND mode=?
+FROM allocation_entries WHERE scheme_id=?1 AND user_id=?2
+AND started_at>=?3 AND started_at<?4 AND mode=?5
 `
 
 type AllocationMemberUsageParams struct {
 	SchemeID    int64
 	UserID      int64
-	WindowStart int64
+	StartedFrom int64
+	StartedTo   int64
 	Mode        string
 }
 
@@ -150,11 +89,13 @@ type AllocationMemberUsageRow struct {
 	Tokens int64
 }
 
+// A time-zone change reassigns existing requests by their start instant, regardless of their stored original window.
 func (q *Queries) AllocationMemberUsage(ctx context.Context, arg AllocationMemberUsageParams) (AllocationMemberUsageRow, error) {
 	row := q.db.QueryRowContext(ctx, allocationMemberUsage,
 		arg.SchemeID,
 		arg.UserID,
-		arg.WindowStart,
+		arg.StartedFrom,
+		arg.StartedTo,
 		arg.Mode,
 	)
 	var i AllocationMemberUsageRow
@@ -200,89 +141,6 @@ func (q *Queries) AllocationPoolAccounts(ctx context.Context, groupID int64) ([]
 		return nil, err
 	}
 	return items, nil
-}
-
-const allocationUnassigned = `-- name: AllocationUnassigned :one
-SELECT CAST(COALESCE(sum(unassigned),0) AS INTEGER) FROM allocation_windows WHERE scheme_id=?
-`
-
-func (q *Queries) AllocationUnassigned(ctx context.Context, schemeID int64) (int64, error) {
-	row := q.db.QueryRowContext(ctx, allocationUnassigned, schemeID)
-	var column_1 int64
-	err := row.Scan(&column_1)
-	return column_1, err
-}
-
-const allocationWindowTokens = `-- name: AllocationWindowTokens :one
-SELECT CAST(COALESCE(sum(e.input_tokens+e.output_tokens),0) AS INTEGER) FROM allocation_debits d
-JOIN allocation_entries e ON e.request_id=d.request_id WHERE d.window_id=? AND e.user_id=?
-`
-
-type AllocationWindowTokensParams struct {
-	WindowID int64
-	UserID   int64
-}
-
-func (q *Queries) AllocationWindowTokens(ctx context.Context, arg AllocationWindowTokensParams) (int64, error) {
-	row := q.db.QueryRowContext(ctx, allocationWindowTokens, arg.WindowID, arg.UserID)
-	var column_1 int64
-	err := row.Scan(&column_1)
-	return column_1, err
-}
-
-const allocationWindowUsage = `-- name: AllocationWindowUsage :many
-SELECT m.user_id,m.allowance,CAST(COALESCE(sum(d.points),0) AS INTEGER) AS used
-FROM allocation_window_members m LEFT JOIN allocation_entries e ON e.user_id=m.user_id
-LEFT JOIN allocation_debits d ON d.request_id=e.request_id AND d.window_id=m.window_id
-WHERE m.window_id=?1 AND (?2=0 OR m.user_id=?2) GROUP BY m.user_id,m.allowance ORDER BY m.user_id
-`
-
-type AllocationWindowUsageParams struct {
-	WindowID int64
-	UserID   interface{}
-}
-
-type AllocationWindowUsageRow struct {
-	UserID    int64
-	Allowance int64
-	Used      int64
-}
-
-func (q *Queries) AllocationWindowUsage(ctx context.Context, arg AllocationWindowUsageParams) ([]AllocationWindowUsageRow, error) {
-	rows, err := q.db.QueryContext(ctx, allocationWindowUsage, arg.WindowID, arg.UserID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []AllocationWindowUsageRow{}
-	for rows.Next() {
-		var i AllocationWindowUsageRow
-		if err := rows.Scan(&i.UserID, &i.Allowance, &i.Used); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const beginAllocationDebit = `-- name: BeginAllocationDebit :exec
-INSERT INTO allocation_debits(request_id,window_id) VALUES(?,?)
-`
-
-type BeginAllocationDebitParams struct {
-	RequestID string
-	WindowID  int64
-}
-
-func (q *Queries) BeginAllocationDebit(ctx context.Context, arg BeginAllocationDebitParams) error {
-	_, err := q.db.ExecContext(ctx, beginAllocationDebit, arg.RequestID, arg.WindowID)
-	return err
 }
 
 const beginAllocationEntry = `-- name: BeginAllocationEntry :exec
@@ -351,15 +209,6 @@ func (q *Queries) CanUseAllocation(ctx context.Context, arg CanUseAllocationPara
 	return exists, err
 }
 
-const clearAllocationUnassigned = `-- name: ClearAllocationUnassigned :exec
-UPDATE allocation_windows SET unassigned=0 WHERE scheme_id=?
-`
-
-func (q *Queries) ClearAllocationUnassigned(ctx context.Context, schemeID int64) error {
-	_, err := q.db.ExecContext(ctx, clearAllocationUnassigned, schemeID)
-	return err
-}
-
 const createAllocationScheme = `-- name: CreateAllocationScheme :execlastid
 INSERT INTO allocation_schemes(name,group_id,enabled,created_at) VALUES(?,?,?,?)
 `
@@ -382,83 +231,6 @@ func (q *Queries) CreateAllocationScheme(ctx context.Context, arg CreateAllocati
 		return 0, err
 	}
 	return result.LastInsertId()
-}
-
-const createAllocationWindow = `-- name: CreateAllocationWindow :execlastid
-INSERT INTO allocation_windows(scheme_id,account_id,kind,reset_at,account_revision,observed_at,observed_points,baseline_points)
-VALUES(?,?,?,?,?,?,?,?)
-`
-
-type CreateAllocationWindowParams struct {
-	SchemeID        int64
-	AccountID       string
-	Kind            string
-	ResetAt         int64
-	AccountRevision int64
-	ObservedAt      int64
-	ObservedPoints  int64
-	BaselinePoints  int64
-}
-
-func (q *Queries) CreateAllocationWindow(ctx context.Context, arg CreateAllocationWindowParams) (int64, error) {
-	result, err := q.db.ExecContext(ctx, createAllocationWindow,
-		arg.SchemeID,
-		arg.AccountID,
-		arg.Kind,
-		arg.ResetAt,
-		arg.AccountRevision,
-		arg.ObservedAt,
-		arg.ObservedPoints,
-		arg.BaselinePoints,
-	)
-	if err != nil {
-		return 0, err
-	}
-	return result.LastInsertId()
-}
-
-const currentAccountAllocationWindows = `-- name: CurrentAccountAllocationWindows :many
-SELECT id, scheme_id, account_id, kind, reset_at, account_revision, observed_at, observed_points, baseline_points, unassigned FROM allocation_windows WHERE scheme_id=? AND account_id=? AND reset_at>? ORDER BY kind
-`
-
-type CurrentAccountAllocationWindowsParams struct {
-	SchemeID  int64
-	AccountID string
-	ResetAt   int64
-}
-
-func (q *Queries) CurrentAccountAllocationWindows(ctx context.Context, arg CurrentAccountAllocationWindowsParams) ([]AllocationWindow, error) {
-	rows, err := q.db.QueryContext(ctx, currentAccountAllocationWindows, arg.SchemeID, arg.AccountID, arg.ResetAt)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []AllocationWindow{}
-	for rows.Next() {
-		var i AllocationWindow
-		if err := rows.Scan(
-			&i.ID,
-			&i.SchemeID,
-			&i.AccountID,
-			&i.Kind,
-			&i.ResetAt,
-			&i.AccountRevision,
-			&i.ObservedAt,
-			&i.ObservedPoints,
-			&i.BaselinePoints,
-			&i.Unassigned,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
 }
 
 const currentAllocationRevision = `-- name: CurrentAllocationRevision :one
@@ -494,40 +266,6 @@ type DeleteNextAllocationRevisionsParams struct {
 func (q *Queries) DeleteNextAllocationRevisions(ctx context.Context, arg DeleteNextAllocationRevisionsParams) error {
 	_, err := q.db.ExecContext(ctx, deleteNextAllocationRevisions, arg.SchemeID, arg.EffectiveAt)
 	return err
-}
-
-const findAllocationWindow = `-- name: FindAllocationWindow :one
-SELECT id, scheme_id, account_id, kind, reset_at, account_revision, observed_at, observed_points, baseline_points, unassigned FROM allocation_windows WHERE scheme_id=? AND account_id=? AND kind=? AND reset_at=?
-`
-
-type FindAllocationWindowParams struct {
-	SchemeID  int64
-	AccountID string
-	Kind      string
-	ResetAt   int64
-}
-
-func (q *Queries) FindAllocationWindow(ctx context.Context, arg FindAllocationWindowParams) (AllocationWindow, error) {
-	row := q.db.QueryRowContext(ctx, findAllocationWindow,
-		arg.SchemeID,
-		arg.AccountID,
-		arg.Kind,
-		arg.ResetAt,
-	)
-	var i AllocationWindow
-	err := row.Scan(
-		&i.ID,
-		&i.SchemeID,
-		&i.AccountID,
-		&i.Kind,
-		&i.ResetAt,
-		&i.AccountRevision,
-		&i.ObservedAt,
-		&i.ObservedPoints,
-		&i.BaselinePoints,
-		&i.Unassigned,
-	)
-	return i, err
 }
 
 const finishAllocationEntry = `-- name: FinishAllocationEntry :exec
@@ -632,28 +370,6 @@ func (q *Queries) GetAllocationScheme(ctx context.Context, id int64) (GetAllocat
 	return i, err
 }
 
-const getAllocationWindow = `-- name: GetAllocationWindow :one
-SELECT id, scheme_id, account_id, kind, reset_at, account_revision, observed_at, observed_points, baseline_points, unassigned FROM allocation_windows WHERE id=?
-`
-
-func (q *Queries) GetAllocationWindow(ctx context.Context, id int64) (AllocationWindow, error) {
-	row := q.db.QueryRowContext(ctx, getAllocationWindow, id)
-	var i AllocationWindow
-	err := row.Scan(
-		&i.ID,
-		&i.SchemeID,
-		&i.AccountID,
-		&i.Kind,
-		&i.ResetAt,
-		&i.AccountRevision,
-		&i.ObservedAt,
-		&i.ObservedPoints,
-		&i.BaselinePoints,
-		&i.Unassigned,
-	)
-	return i, err
-}
-
 const getKeyAllocation = `-- name: GetKeyAllocation :one
 SELECT scheme_id FROM allocation_keys WHERE key_id=?
 `
@@ -674,51 +390,6 @@ func (q *Queries) GetPoolAllocation(ctx context.Context, groupID int64) (int64, 
 	var id int64
 	err := row.Scan(&id)
 	return id, err
-}
-
-const getRequestAllocationDebits = `-- name: GetRequestAllocationDebits :many
-SELECT d.request_id, d.window_id, d.points, d.reconciled,w.kind,w.reset_at,w.account_id FROM allocation_debits d JOIN allocation_windows w ON w.id=d.window_id WHERE request_id=?
-`
-
-type GetRequestAllocationDebitsRow struct {
-	RequestID  string
-	WindowID   int64
-	Points     int64
-	Reconciled int64
-	Kind       string
-	ResetAt    int64
-	AccountID  string
-}
-
-func (q *Queries) GetRequestAllocationDebits(ctx context.Context, requestID string) ([]GetRequestAllocationDebitsRow, error) {
-	rows, err := q.db.QueryContext(ctx, getRequestAllocationDebits, requestID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []GetRequestAllocationDebitsRow{}
-	for rows.Next() {
-		var i GetRequestAllocationDebitsRow
-		if err := rows.Scan(
-			&i.RequestID,
-			&i.WindowID,
-			&i.Points,
-			&i.Reconciled,
-			&i.Kind,
-			&i.ResetAt,
-			&i.AccountID,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
 }
 
 const getTenantAllocationScheme = `-- name: GetTenantAllocationScheme :one
@@ -754,58 +425,8 @@ func (q *Queries) GetTenantAllocationScheme(ctx context.Context, arg GetTenantAl
 	return i, err
 }
 
-const listAllocationDebits = `-- name: ListAllocationDebits :many
-SELECT d.request_id, d.window_id, d.points, d.reconciled,e.cost,e.state,e.finished_at,e.started_at,e.user_id FROM allocation_debits d
-JOIN allocation_entries e ON e.request_id=d.request_id WHERE window_id=? AND reconciled=0 ORDER BY e.started_at,e.request_id
-`
-
-type ListAllocationDebitsRow struct {
-	RequestID  string
-	WindowID   int64
-	Points     int64
-	Reconciled int64
-	Cost       int64
-	State      string
-	FinishedAt int64
-	StartedAt  int64
-	UserID     int64
-}
-
-func (q *Queries) ListAllocationDebits(ctx context.Context, windowID int64) ([]ListAllocationDebitsRow, error) {
-	rows, err := q.db.QueryContext(ctx, listAllocationDebits, windowID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []ListAllocationDebitsRow{}
-	for rows.Next() {
-		var i ListAllocationDebitsRow
-		if err := rows.Scan(
-			&i.RequestID,
-			&i.WindowID,
-			&i.Points,
-			&i.Reconciled,
-			&i.Cost,
-			&i.State,
-			&i.FinishedAt,
-			&i.StartedAt,
-			&i.UserID,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listAllocationPending = `-- name: ListAllocationPending :many
-SELECT request_id, scheme_id, revision_id, user_id, account_id, model, mode, window_start, reset_at, started_at, finished_at, state, input_tokens, output_tokens, cached_tokens, cost, manual FROM allocation_entries WHERE scheme_id=?1 AND (?2=0 OR user_id=?2) AND (state='pending' OR state='observed') ORDER BY started_at LIMIT 256
+SELECT request_id, scheme_id, revision_id, user_id, account_id, model, mode, window_start, reset_at, started_at, finished_at, state, input_tokens, output_tokens, cached_tokens, cost, manual FROM allocation_entries WHERE scheme_id=?1 AND (?2=0 OR user_id=?2) AND state='pending' ORDER BY started_at DESC,request_id DESC LIMIT 256
 `
 
 type ListAllocationPendingParams struct {
@@ -841,6 +462,115 @@ func (q *Queries) ListAllocationPending(ctx context.Context, arg ListAllocationP
 			&i.Cost,
 			&i.Manual,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAllocationPoolCatalogs = `-- name: ListAllocationPoolCatalogs :many
+SELECT ga.group_id,a.id,a.provider,a.models_snapshot,a.models_revision
+FROM group_accounts ga JOIN allocation_schemes s ON s.group_id=ga.group_id
+JOIN account_groups g ON g.id=s.group_id JOIN accounts a ON a.id=ga.account_id
+WHERE g.tenant_id=?1 AND a.enabled=1 AND a.status!='reauth_required'
+ORDER BY ga.group_id,a.id
+`
+
+type ListAllocationPoolCatalogsRow struct {
+	GroupID        int64
+	ID             string
+	Provider       string
+	ModelsSnapshot []byte
+	ModelsRevision int64
+}
+
+func (q *Queries) ListAllocationPoolCatalogs(ctx context.Context, tenantID int64) ([]ListAllocationPoolCatalogsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listAllocationPoolCatalogs, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAllocationPoolCatalogsRow{}
+	for rows.Next() {
+		var i ListAllocationPoolCatalogsRow
+		if err := rows.Scan(
+			&i.GroupID,
+			&i.ID,
+			&i.Provider,
+			&i.ModelsSnapshot,
+			&i.ModelsRevision,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAllocationPoolModels = `-- name: ListAllocationPoolModels :many
+SELECT gm.group_id,gm.model FROM group_models gm
+JOIN allocation_schemes s ON s.group_id=gm.group_id
+JOIN account_groups g ON g.id=s.group_id
+WHERE g.tenant_id=?1 ORDER BY gm.group_id,gm.model
+`
+
+func (q *Queries) ListAllocationPoolModels(ctx context.Context, tenantID int64) ([]GroupModel, error) {
+	rows, err := q.db.QueryContext(ctx, listAllocationPoolModels, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GroupModel{}
+	for rows.Next() {
+		var i GroupModel
+		if err := rows.Scan(&i.GroupID, &i.Model); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAllocationPoolPolicies = `-- name: ListAllocationPoolPolicies :many
+SELECT g.id AS group_id,g.restricted_models
+FROM allocation_schemes s JOIN account_groups g ON g.id=s.group_id
+WHERE g.tenant_id=?1 ORDER BY g.id
+`
+
+type ListAllocationPoolPoliciesRow struct {
+	GroupID          int64
+	RestrictedModels bool
+}
+
+func (q *Queries) ListAllocationPoolPolicies(ctx context.Context, tenantID int64) ([]ListAllocationPoolPoliciesRow, error) {
+	rows, err := q.db.QueryContext(ctx, listAllocationPoolPolicies, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAllocationPoolPoliciesRow{}
+	for rows.Next() {
+		var i ListAllocationPoolPoliciesRow
+		if err := rows.Scan(&i.GroupID, &i.RestrictedModels); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -898,60 +628,6 @@ func (q *Queries) ListAllocationSchemes(ctx context.Context, tenantID int64) ([]
 	return items, nil
 }
 
-const listAllocationWindows = `-- name: ListAllocationWindows :many
-SELECT id, scheme_id, account_id, kind, reset_at, account_revision, observed_at, observed_points, baseline_points, unassigned FROM allocation_windows WHERE scheme_id=? ORDER BY account_id,kind,reset_at DESC
-`
-
-func (q *Queries) ListAllocationWindows(ctx context.Context, schemeID int64) ([]AllocationWindow, error) {
-	rows, err := q.db.QueryContext(ctx, listAllocationWindows, schemeID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []AllocationWindow{}
-	for rows.Next() {
-		var i AllocationWindow
-		if err := rows.Scan(
-			&i.ID,
-			&i.SchemeID,
-			&i.AccountID,
-			&i.Kind,
-			&i.ResetAt,
-			&i.AccountRevision,
-			&i.ObservedAt,
-			&i.ObservedPoints,
-			&i.BaselinePoints,
-			&i.Unassigned,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const markExpiredAllocationEntries = `-- name: MarkExpiredAllocationEntries :exec
-UPDATE allocation_entries SET state='pending' WHERE allocation_entries.scheme_id=?1 AND state='observed'
-AND EXISTS(SELECT 1 FROM allocation_debits d JOIN allocation_windows w ON w.id=d.window_id
-WHERE d.request_id=allocation_entries.request_id AND d.reconciled=0 AND w.reset_at<=?2)
-`
-
-type MarkExpiredAllocationEntriesParams struct {
-	SchemeID int64
-	ResetAt  int64
-}
-
-func (q *Queries) MarkExpiredAllocationEntries(ctx context.Context, arg MarkExpiredAllocationEntriesParams) error {
-	_, err := q.db.ExecContext(ctx, markExpiredAllocationEntries, arg.SchemeID, arg.ResetAt)
-	return err
-}
-
 const nextAllocationRevision = `-- name: NextAllocationRevision :one
 SELECT id, scheme_id, effective_at, config FROM allocation_revisions WHERE scheme_id=? AND effective_at>? ORDER BY effective_at LIMIT 1
 `
@@ -973,44 +649,8 @@ func (q *Queries) NextAllocationRevision(ctx context.Context, arg NextAllocation
 	return i, err
 }
 
-const observeAllocationWindow = `-- name: ObserveAllocationWindow :exec
-UPDATE allocation_windows SET observed_at=?,observed_points=?,unassigned=unassigned+? WHERE id=?
-`
-
-type ObserveAllocationWindowParams struct {
-	ObservedAt     int64
-	ObservedPoints int64
-	Unassigned     int64
-	ID             int64
-}
-
-func (q *Queries) ObserveAllocationWindow(ctx context.Context, arg ObserveAllocationWindowParams) error {
-	_, err := q.db.ExecContext(ctx, observeAllocationWindow,
-		arg.ObservedAt,
-		arg.ObservedPoints,
-		arg.Unassigned,
-		arg.ID,
-	)
-	return err
-}
-
-const pruneAllocationWindows = `-- name: PruneAllocationWindows :exec
-DELETE FROM allocation_windows WHERE reset_at<? AND unassigned=0
-AND NOT EXISTS(SELECT 1 FROM allocation_debits WHERE window_id=allocation_windows.id)
-`
-
-func (q *Queries) PruneAllocationWindows(ctx context.Context, resetAt int64) error {
-	_, err := q.db.ExecContext(ctx, pruneAllocationWindows, resetAt)
-	return err
-}
-
 const pruneAllocations = `-- name: PruneAllocations :exec
-DELETE FROM allocation_entries WHERE state='settled' AND (
- (mode<>'ratio' AND allocation_entries.reset_at<?1) OR
- (mode='ratio' AND finished_at<?1*1000 AND NOT EXISTS(
- SELECT 1 FROM allocation_debits d JOIN allocation_windows w ON w.id=d.window_id
- WHERE d.request_id=allocation_entries.request_id AND (d.reconciled=0 OR w.reset_at>=?1)))
-)
+DELETE FROM allocation_entries WHERE state='settled' AND reset_at<?1
 `
 
 func (q *Queries) PruneAllocations(ctx context.Context, before int64) error {
@@ -1026,20 +666,6 @@ WHERE s.id=allocation_entries.scheme_id AND g.tenant_id=?1)
 
 func (q *Queries) RecoverAllocationEntries(ctx context.Context, tenantID int64) error {
 	_, err := q.db.ExecContext(ctx, recoverAllocationEntries, tenantID)
-	return err
-}
-
-const revalidateAllocationWindow = `-- name: RevalidateAllocationWindow :exec
-UPDATE allocation_windows SET account_revision=? WHERE id=?
-`
-
-type RevalidateAllocationWindowParams struct {
-	AccountRevision int64
-	ID              int64
-}
-
-func (q *Queries) RevalidateAllocationWindow(ctx context.Context, arg RevalidateAllocationWindowParams) error {
-	_, err := q.db.ExecContext(ctx, revalidateAllocationWindow, arg.AccountRevision, arg.ID)
 	return err
 }
 
@@ -1059,31 +685,6 @@ func (q *Queries) SaveAllocationRevision(ctx context.Context, arg SaveAllocation
 		return 0, err
 	}
 	return result.LastInsertId()
-}
-
-const setAllocationDebit = `-- name: SetAllocationDebit :exec
-UPDATE allocation_debits SET points=?,reconciled=1 WHERE request_id=? AND window_id=?
-`
-
-type SetAllocationDebitParams struct {
-	Points    int64
-	RequestID string
-	WindowID  int64
-}
-
-func (q *Queries) SetAllocationDebit(ctx context.Context, arg SetAllocationDebitParams) error {
-	_, err := q.db.ExecContext(ctx, setAllocationDebit, arg.Points, arg.RequestID, arg.WindowID)
-	return err
-}
-
-const settleReconciledAllocationEntries = `-- name: SettleReconciledAllocationEntries :exec
-UPDATE allocation_entries SET state='settled' WHERE scheme_id=? AND state='observed'
-AND NOT EXISTS(SELECT 1 FROM allocation_debits d WHERE d.request_id=allocation_entries.request_id AND d.reconciled=0)
-`
-
-func (q *Queries) SettleReconciledAllocationEntries(ctx context.Context, schemeID int64) error {
-	_, err := q.db.ExecContext(ctx, settleReconciledAllocationEntries, schemeID)
-	return err
 }
 
 const updateAllocationScheme = `-- name: UpdateAllocationScheme :exec

@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ChevronDown, RefreshCw } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { authOptions } from '@/lib/auth'
+import { useTimeZone } from '@/lib/timezone'
 import {
   statisticsOptions,
   ownLimitOptions,
@@ -46,6 +47,7 @@ function UsageScopeView({ scope }: { scope: UsageScope }) {
 }
 function UsageReport({ scope, userID }: { scope: UsageScope; userID: number }) {
   const { t, i18n } = useTranslation()
+  const timeZone = useTimeZone()
   const client = useQueryClient()
   const [days, setDays] = useState(7)
   const [metric, setMetric] = useState<UsageMetric>('requests')
@@ -65,7 +67,7 @@ function UsageReport({ scope, userID }: { scope: UsageScope; userID: number }) {
   const timestamp = new Intl.DateTimeFormat(i18n.resolvedLanguage ?? 'en', {
     dateStyle: 'medium',
     timeStyle: 'short',
-    timeZone: 'UTC',
+    timeZone,
   })
   const periods = [1, 7, 30, 90]
   const period = (value: number) =>
@@ -229,6 +231,7 @@ function UsageReport({ scope, userID }: { scope: UsageScope; userID: number }) {
             <p className="text-xs text-muted-foreground">
               {t('usageTrackingSince', {
                 time: timestamp.format(query.data.tracking_since * 1000),
+                zone: timeZone,
               })}
             </p>
             <dl className="grid grid-cols-2 gap-x-6 gap-y-6 border-y border-border py-6 lg:grid-cols-4">

@@ -16,6 +16,7 @@ import (
 	"github.com/murongg/SubLane/internal/groups"
 	"github.com/murongg/SubLane/internal/pricing"
 	"github.com/murongg/SubLane/internal/storage/db"
+	"github.com/murongg/SubLane/internal/timezone"
 	"github.com/murongg/SubLane/internal/upstream"
 )
 
@@ -61,7 +62,15 @@ type Service struct {
 	usage             *usageCache
 	catalog           *catalogCache
 	pricing           *pricing.Service
-	allocationSync    map[string]uint64
+	timeZone          *timezone.Service
+}
+
+func (s *Service) SetTimeZone(zone *timezone.Service) { s.timeZone = zone }
+func (s *Service) location() *time.Location {
+	if s.timeZone == nil {
+		return time.UTC
+	}
+	return s.timeZone.Location()
 }
 
 func New(ctx context.Context, connection *sql.DB, accounts *accounts.Service, provider *upstream.Client, catalogs ...*pricing.Service) *Service {
@@ -160,9 +169,6 @@ func (s *Service) Open(ctx context.Context, userID, groupID int64, raw []byte, h
 	if err := s.warmUsage(ctx, userID, groupID, discoveryProvider); err != nil {
 		return nil, err
 	}
-	if err := s.refreshAllocation(ctx, entry); err != nil {
-		return nil, err
-	}
 	s.mu.Lock()
 	if err := s.prepareAllocation(ctx, entry); err != nil {
 		s.mu.Unlock()
@@ -179,7 +185,7 @@ func (s *Service) Open(ctx context.Context, userID, groupID int64, raw []byte, h
 		tx, beginErr := s.db.BeginTx(ctx, nil)
 		err = beginErr
 		if err == nil {
-			err = allocations.Begin(ctx, s.queries.WithTx(tx), allocations.Request{ID: entry.record.RequestID, SchemeID: entry.schemeID, UserID: userID, GroupID: groupID, AccountID: id, Model: model, StartedAt: entry.started.Unix()}, s.now().Unix())
+			err = allocations.Begin(ctx, s.queries.WithTx(tx), allocations.Request{ID: entry.record.RequestID, SchemeID: entry.schemeID, UserID: userID, GroupID: groupID, AccountID: id, Model: model, StartedAt: entry.started.Unix()}, s.now().Unix(), s.location())
 			if err == nil {
 				err = tx.Commit()
 			}

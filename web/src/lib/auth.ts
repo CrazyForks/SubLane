@@ -5,6 +5,7 @@ import { request } from './request'
 const authSchema = z
   .object({
     initialized: z.boolean(),
+    time_zone: z.string().default('UTC'),
     workspace_count: z.number().int().nonnegative().optional(),
     needs_workspace: z.boolean().optional(),
     user: z

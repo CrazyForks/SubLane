@@ -21,6 +21,7 @@ import (
 	"github.com/murongg/SubLane/internal/server"
 	"github.com/murongg/SubLane/internal/storage"
 	"github.com/murongg/SubLane/internal/tenants"
+	"github.com/murongg/SubLane/internal/timezone"
 	"github.com/murongg/SubLane/internal/upstream"
 	"github.com/murongg/SubLane/internal/versions"
 	"github.com/murongg/SubLane/web"
@@ -104,6 +105,10 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	timeZone, err := timezone.New(ctx, db)
+	if err != nil {
+		return fmt.Errorf("load instance time zone: %w", err)
+	}
 	codexVersions.Start()
 	defer codexVersions.Close()
 	provider := upstream.NewWithVersion(codexVersions.Current)
@@ -122,7 +127,7 @@ func run() error {
 	priceCatalog.Start(ctx)
 	defer priceCatalog.Close()
 	registry := &tenantRegistry{ctx: ctx, db: db, vault: cipher, auth: authentication,
-		tenants: tenancy, provider: provider, pricing: priceCatalog, versions: codexVersions,
+		tenants: tenancy, provider: provider, pricing: priceCatalog, versions: codexVersions, timeZone: timeZone,
 		assets: web.Assets(), dataDir: cfg.DataDir, publicURL: cfg.PublicURL,
 		version: version, started: time.Now()}
 	defer registry.Close()

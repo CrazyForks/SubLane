@@ -52,14 +52,6 @@ CREATE TABLE "accounts" (
     UNIQUE(tenant_id, provider, account_id)
 );
 
-CREATE TABLE allocation_debits (
- request_id TEXT NOT NULL REFERENCES allocation_entries(request_id) ON DELETE CASCADE,
- window_id INTEGER NOT NULL REFERENCES allocation_windows(id) ON DELETE CASCADE,
- points INTEGER NOT NULL DEFAULT 0 CHECK(points>=0),
- reconciled INTEGER NOT NULL DEFAULT 0 CHECK(reconciled IN (0,1)),
- PRIMARY KEY(request_id,window_id)
-);
-
 CREATE TABLE allocation_entries (
  request_id TEXT PRIMARY KEY,
  scheme_id INTEGER NOT NULL REFERENCES allocation_schemes(id),
@@ -67,12 +59,12 @@ CREATE TABLE allocation_entries (
  user_id INTEGER NOT NULL REFERENCES users(id),
  account_id TEXT NOT NULL,
  model TEXT NOT NULL,
- mode TEXT NOT NULL CHECK(mode IN ('tokens','amount','ratio')),
+ mode TEXT NOT NULL CHECK(mode IN ('tokens','amount')),
  window_start INTEGER NOT NULL,
  reset_at INTEGER NOT NULL,
  started_at INTEGER NOT NULL,
  finished_at INTEGER NOT NULL DEFAULT 0,
- state TEXT NOT NULL CHECK(state IN ('active','pending','observed','settled')),
+ state TEXT NOT NULL CHECK(state IN ('active','pending','settled')),
  input_tokens INTEGER NOT NULL DEFAULT 0,
  output_tokens INTEGER NOT NULL DEFAULT 0,
  cached_tokens INTEGER NOT NULL DEFAULT 0,
@@ -99,27 +91,6 @@ CREATE TABLE "allocation_schemes" (
  group_id INTEGER NOT NULL UNIQUE REFERENCES account_groups(id),
  enabled INTEGER NOT NULL CHECK(enabled IN (0,1)),
  created_at INTEGER NOT NULL
-);
-
-CREATE TABLE allocation_window_members (
- window_id INTEGER NOT NULL REFERENCES allocation_windows(id) ON DELETE CASCADE,
- user_id INTEGER NOT NULL REFERENCES users(id),
- allowance INTEGER NOT NULL CHECK(allowance>=0),
- PRIMARY KEY(window_id,user_id)
-);
-
-CREATE TABLE allocation_windows (
- id INTEGER PRIMARY KEY AUTOINCREMENT,
- scheme_id INTEGER NOT NULL REFERENCES allocation_schemes(id),
- account_id TEXT NOT NULL,
- kind TEXT NOT NULL,
- reset_at INTEGER NOT NULL,
- account_revision INTEGER NOT NULL,
- observed_at INTEGER NOT NULL,
- observed_points INTEGER NOT NULL,
- baseline_points INTEGER NOT NULL,
- unassigned INTEGER NOT NULL DEFAULT 0,
- UNIQUE(scheme_id,account_id,kind,reset_at)
 );
 
 CREATE TABLE "api_keys" (
@@ -286,8 +257,6 @@ CREATE INDEX accounts_tenant ON accounts(tenant_id, id);
 CREATE INDEX allocation_entries_member ON allocation_entries(scheme_id,user_id,window_start);
 
 CREATE INDEX allocation_entries_pending ON allocation_entries(account_id,state);
-
-CREATE INDEX allocation_windows_reset ON allocation_windows(reset_at);
 
 CREATE INDEX api_keys_active_owner ON api_keys(user_id) WHERE revoked_at IS NULL;
 

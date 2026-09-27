@@ -18,6 +18,7 @@ import (
 	"github.com/murongg/SubLane/internal/pricing"
 	"github.com/murongg/SubLane/internal/server"
 	"github.com/murongg/SubLane/internal/tenants"
+	"github.com/murongg/SubLane/internal/timezone"
 	"github.com/murongg/SubLane/internal/upstream"
 	"github.com/murongg/SubLane/internal/vault"
 	"github.com/murongg/SubLane/internal/versions"
@@ -39,6 +40,7 @@ type tenantRegistry struct {
 	provider  *upstream.Client
 	pricing   *pricing.Service
 	versions  *versions.Service
+	timeZone  *timezone.Service
 	assets    fs.FS
 	dataDir   string
 	publicURL string
@@ -55,6 +57,7 @@ func (r *tenantRegistry) Handler(id int64) http.Handler {
 	accountService := accounts.NewForTenant(r.db, r.vault, id)
 	accountService.RestrictToCodex()
 	forwarding := gateway.NewForTenant(r.ctx, r.db, accountService, r.provider, id, r.pricing)
+	forwarding.SetTimeZone(r.timeZone)
 	dataDir := ""
 	var codexVersions *versions.Service
 	if id == 1 {
@@ -67,7 +70,7 @@ func (r *tenantRegistry) Handler(id int64) http.Handler {
 		Keys: apikey.NewForTenant(r.db, r.vault, id), Accounts: accountService,
 		OAuth: oauth.New(accountService, r.provider), Gateway: forwarding,
 		Groups: groups.NewForTenant(r.db, id), Tenants: r.tenants, TenantID: id,
-		PublicURL: r.publicURL, CodexVersions: codexVersions,
+		PublicURL: r.publicURL, CodexVersions: codexVersions, TimeZone: r.timeZone,
 	})
 	if r.runtimes == nil {
 		r.runtimes = make(map[int64]tenantRuntime)

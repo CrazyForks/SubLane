@@ -172,7 +172,7 @@ func TestOpenAddsProxyCheckColumnsToExistingProxySchema(t *testing.T) {
 		t.Fatalf("proxy migration: %q %d %d %d %v", name, revision, checkedAt, reachable, err)
 	}
 	var count int
-	if err := upgraded.QueryRowContext(ctx, "SELECT count(*) FROM schema_migrations").Scan(&count); err != nil || count != 3 {
+	if err := upgraded.QueryRowContext(ctx, "SELECT count(*) FROM schema_migrations").Scan(&count); err != nil || count != 4 {
 		t.Fatalf("merged migration count: %d %v", count, err)
 	}
 }
@@ -192,7 +192,7 @@ func TestOpenNormalizesFormerProxyCheckMigration(t *testing.T) {
 		t.Fatalf("former proxy data: %d %q %v", checkedAt, exitIP, err)
 	}
 	var count int
-	if err := upgraded.QueryRowContext(ctx, "SELECT count(*) FROM schema_migrations").Scan(&count); err != nil || count != 3 {
+	if err := upgraded.QueryRowContext(ctx, "SELECT count(*) FROM schema_migrations").Scan(&count); err != nil || count != 4 {
 		t.Fatalf("former migration record retained: %d %v", count, err)
 	}
 }
@@ -211,7 +211,7 @@ func TestValidateSnapshotAcceptsFormerProxyCheckHistory(t *testing.T) {
 		t.Fatalf("former backup history: %d %v", version, err)
 	}
 	current, err := CurrentSchemaVersion()
-	if err != nil || current != 3 {
+	if err != nil || current != 4 {
 		t.Fatalf("merged current version: %d %v", current, err)
 	}
 }

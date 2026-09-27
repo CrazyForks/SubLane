@@ -61,19 +61,6 @@ type AllocationRevision struct {
 	Config      string
 }
 
-type AllocationWindow struct {
-	ID              int64
-	SchemeID        int64
-	AccountID       string
-	Kind            string
-	ResetAt         int64
-	AccountRevision int64
-	ObservedAt      int64
-	ObservedPoints  int64
-	BaselinePoints  int64
-	Unassigned      int64
-}
-
 type AuditEvent struct {
 	ID         int64
 	TenantID   int64
@@ -87,6 +74,11 @@ type AuditEvent struct {
 	Outcome    string
 	HttpStatus *int64
 	CreatedAt  int64
+}
+
+type GroupModel struct {
+	GroupID int64
+	Model   string
 }
 
 type Proxy struct {

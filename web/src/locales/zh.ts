@@ -23,118 +23,153 @@ export const zh: Record<keyof typeof en, string> = {
   allocationNoGrantedMembers: '请先授权成员使用此账号池，再分配额度。',
   allocationSchemes: '用量分配',
   allocationsDescription:
-    '为已获账号池使用权限的成员设置用量上限，可按订阅额度比例、金额或 Token 计算。',
+    '为已获账号池使用权限的成员设置额度，可按 Token 或内部金额总预算比例，也可直接设置成员上限。',
   allocationCreate: '添加用量分配',
   allocationEdit: '编辑用量分配',
   allocationEditNamed: '编辑用量分配 {{name}}',
   allocationName: '分配名称',
   allocationMode: '分配方式',
   allocationRatio: '按比例',
+  allocationRatioUnit: '比例依据',
+  allocationRatioTokens: '按 Token 比例',
+  allocationRatioAmount: '按金额比例',
   allocationShares: '成员份额',
   allocationSplitEqually: '平均分配',
-  allocationSettings: '计量与生效设置',
-  allocationShareRules:
-    '池内每个订阅账号都使用这组比例，各额度窗口独立重置。只有打开下方选项后，才会借用空闲份额。',
-  allocationAllowIdleBorrow: '允许借用空闲份额',
-  allocationAllowIdleBorrowHint:
-    '成员可以使用同一账号窗口内其他成员未用的份额。会话仍保持原账号，借用量会单独记录，最终以额度同步结算为准。',
-  allocationSubscription: '订阅账号 {{label}}',
-  allocationUpdating: '用量更新中',
-  allocationSyncPaused: '等待额度同步',
-  allocationSyncPausedHint:
-    '暂时无法确认此账号的额度，已暂停接收新请求。请稍后重试；持续未恢复时联系管理员。',
-  allocationAutomaticHint:
-    '{{count}} 条已完成请求正在等待上游额度更新，系统会自动重试，正常同步期间无需手动填写。',
-  allocationEstimatedUsed: '已用（估算）',
-  allocationEstimatedRemaining: '剩余（估算）',
-  allocationAccountExhausted:
-    '你在此账号、此窗口的份额已用完，不代表整个账号池都没有额度。已有会话会继续保持原账号。',
-  allocationBorrowed: '已从成员空闲份额借用 {{points}} 点。',
+  allocationSectionDetails: '规则信息',
+  allocationSectionPolicy: '额度与重置',
+  allocationSectionActivation: '生效设置',
+  allocationModeRatioSummary: '共同预算按成员百分比分配',
+  allocationModeAmountSummary: '为每人设置 USD 金额上限',
+  allocationModeTokensSummary: '为每人设置 Token 上限',
+  allocationModeWindowsSummary: '按时长设置多项 USD 上限',
   allocationAmount: '按金额',
   allocationTokens: '按 Token',
+  allocationWindows: '按时间窗口',
+  allocationWindowConditions: '时间窗口条件',
+  allocationWindowConditionsHint:
+    '最多添加 8 个窗口。每项分别设置时长和统一 USD 上限；留空表示不限量。',
+  allocationAddCondition: '添加条件',
+  allocationCondition: '条件 {{index}}',
+  allocationConditionDuration: '条件 {{index}} 的时长',
+  allocationConditionUnit: '条件 {{index}} 的单位',
+  allocationConditionLimit: '条件 {{index}} 的统一上限',
+  allocationRemoveCondition: '移除条件 {{index}}',
+  allocationHours: '小时',
+  allocationDays: '天',
+  allocationDurationHours: '{{value}} 小时',
+  allocationDurationDays: '{{value}} 天',
+  allocationOverrideWindow: '为 {{name}} 单独设置 {{duration}}',
+  allocationWindowFor: '{{name}} 的 {{duration}} 上限',
+  allocationWindowDurationHint:
+    '各窗口从规则生效时起，分别按自身时长重置。时间按 {{zone}} 显示，可能与上游额度重置不同。',
+  allocationFutureEditDelay:
+    '以后修改此规则，最长可能等待 {{duration}} 才生效，具体以当前最长窗口的下一边界为准。',
+  allocationAutoPricingHint:
+    '保存时会从所选账号池支持的模型中自动回填价格，无需在此填写。',
   allocationSave: '保存用量分配',
   allocationView: '查看用量',
   allocationBack: '返回用量分配',
   allocationsEmpty: '创建专用账号池并授权成员后，即可添加用量分配。',
-  allocationRatioHint:
-    '填写每个人可以使用的份额，例如 50%、30%、20%，无需知道订阅账号共有多少 Token。',
-  allocationAmountHint:
-    '按配置的模型价格扣减美元额度。这是内部使用额度，不代表上游现金余额。',
-  allocationTokensHint:
-    '累计输入与输出 Token。1 M = 1,000,000 Token，缓存输入不重复计算。',
+  allocationTotalBudget: '总预算',
+  allocationSelectAllMembers: '选择全部成员',
+  allocationIncludeMember: '包含 {{name}}',
+  allocationOverrideMember: '为 {{name}} 单独设置',
+  allocationOverrideLimits: '单独设置上限',
+  allocationTotalAmountHint:
+    '这是按保存的模型价格计算的内部 USD 预算，不代表上游现金余额。',
+  allocationTotalTokensHint:
+    '这是你设定的内部预算，不代表订阅账号真实的 Token 容量。1 M = 100 万 Token。',
+  allocationRatioTokenRule: '每位成员获得所选周期内 Token 总预算的对应比例。',
+  allocationRatioAmountRule:
+    '每位成员获得所选周期内内部 USD 总预算的对应比例。',
   allocationExclusiveHint:
     '请使用专用账号池，并先将其账号从其他所有账号池移除。添加用量分配后，账号池及池内账号固定；该账号池原有的未绑定 Key 将停止工作。',
   allocationMembers: '成员分配',
-  allocationBlankHint: '留空表示不为该成员分配额度。',
+  allocationBlankHint: '先勾选要分配的成员，再为每位已选成员填写额度或比例。',
   allocationFor: '{{name}} 的额度',
   allocationTotal: '已分配 {{total}}% · 未分配 {{remaining}}%',
   allocationPeriod: '重置周期',
-  allocationUpstreamReset: '跟随各账号的上游额度窗口',
-  allocationRates: '模型价格与权重',
-  allocationRatesHint:
-    '选择此账号池中的模型后自动填入目录价格，切换模型会更新价格。保存前可以修改；保存后，此配置会固定当时的价格快照。',
-  allocationAutoRatesHint:
-    '用量根据上游额度变化估算，模型权重由系统自动配置；API 价格不代表上游订阅的真实扣量公式。',
-  allocationAdvancedRates: '高级设置：自定义模型权重',
-  allocationPriceLoading: '正在获取模型价格…',
-  allocationRateInput: '输入 · USD / M',
-  allocationRateCached: '缓存输入 · USD / M',
-  allocationRateOutput: '输出 · USD / M',
-  allocationAddRate: '添加模型价格',
-  allocationAddAllRates: '添加全部可用模型（{{count}}）',
-  allocationRateLimit: '最多只能配置 128 个模型价格。',
-  allocationRemoveRate: '移除第 {{index}} 项模型价格',
+  allocationWindowSchedule: '{{windows}} 个时间窗口 · {{zone}}',
+  allocationWindowReached: '已到上限',
+  allocationWindowRisk: '新请求暂缓',
+  allocationUnlimited: '不限量',
+  allocationUnmeteredExposure:
+    '本窗口：{{inFlight}} 个进行中 · {{pending}} 个待确认用量',
+  allocationWindowPendingHint:
+    '本规则共有 {{pending}} 条待处理记录；每个窗口只计算落在自身时长内的记录。',
+  allocationWindowBlankHint:
+    '只有已勾选的成员可使用此分配。统一或个人条件的金额留空，表示该项条件不限量。',
+  allocationResetDay: '每月第几日',
+  allocationResetTime: '重置时间',
+  allocationResetZoneHint: '时间按实例时区（{{zone}}）计算。',
+  allocationResetShortMonthHint: '若当月没有该日期，则在当月最后一天重置。',
+  allocationDailySchedule: '每日 {{time}} · {{zone}}',
+  allocationMonthlySchedule: '每月 {{day}} 日 {{time}} · {{zone}}',
   allocationRemove: '移除',
-  allocationModelID: '模型 ID',
-  allocationChooseModel: '请选择模型',
-  allocationPriceMissing: '目录中暂无此模型的价格，请手动填写。',
-  allocationPriceFailed: '暂时无法获取模型价格，请手动填写。',
   allocationEnabled: '启用此用量分配',
   allocationNextHint:
-    '额度、价格或计量方式的修改在下周期生效。暂停或启用访问立即生效，当前用量与待结算记录保留。',
+    '额度、价格、计量方式或重置时间的修改在下周期生效。暂停或启用访问立即生效，当前用量与待结算记录保留。',
+  allocationEditEffectivePreview:
+    '按当前周期计算，现在保存的修改预计于 {{date}} 生效；暂停或启用访问会立即生效。',
+  allocationStartEffectivePreview: '若现在保存，此规则预计于 {{date}} 开始。',
+  allocationMissingPrices:
+    '{{count}} 个模型缺少当前目录价格（{{models}}），现正沿用规则已保存的价格。刷新价格目录后，后续规则版本可使用新价格。',
+  allocationUncoveredModels:
+    '{{count}} 个可用模型尚未进入本规则的价格快照（{{models}}）。价格可用后需重新保存规则；在新版本生效前，这些模型的请求仍会被拒绝。',
+  allocationUncoveredModelsScheduled:
+    '已保存的待生效版本仍缺少 {{count}} 个可用模型的价格（{{models}}）。请在它生效前保存修正版本；否则该版本生效后，这些模型的请求仍会被拒绝。',
+  allocationUncoveredModelsTiming: '若现在保存，修改预计于 {{date}} 生效。',
+  allocationUncoveredModelsScheduledTiming:
+    '此已保存的版本定于 {{date}} 生效。',
+  allocationCatalogUnavailable:
+    '部分账号的模型目录暂不可用。有历史价格时会保留；请刷新账号模型以更新覆盖范围。',
+  allocationCurrentPricing: '当前版本的价格覆盖',
+  allocationScheduledPricing: '待生效版本的价格覆盖',
   allocationStartNext: '从下个周期开始',
-  allocationStartNextRatio: '等所有账号的当前窗口均到达下次重置时间后再生效',
   allocationImmediateHint:
-    '立即生效：固定额度从现在开始；比例额度按首次有效观测的上游剩余容量分配。不补记此前用量。',
+    '立即生效：从生效时开始记录新请求的用量，不补记此前用量。',
   allocationScheduled: '{{mode}} 将于 {{date}} 生效',
   allocationLoading: '正在加载额度…',
   allocationFailed: '无法加载或保存额度，请重试。',
   allocationInvalid:
-    '请检查名称、成员、正数额度与模型价格。比例总和不得超过 100%；百分比最多两位小数，M／USD 最多六位。',
+    '请检查名称、已选成员、重置日期时间及时间窗口条件。比例总和不得超过 100%；百分比最多两位小数，M／USD 最多六位。',
   allocationPoolConflict:
     '账号已被其他用量分配占用或与其他池共享。请使用独立账号池；已设置用量分配的池不能修改账号列表。',
-  allocationSnapshotRequired:
-    '需要有效的 Codex 额度数据，请刷新账号用量后重试。未知或已过重置时间的数据不会被视为满额。',
   allocationSettlementConflict:
     '用量已变化，或修正与此前结算冲突，请刷新后重试。',
   allocationPending: '用量待对账',
+  allocationRiskLimit:
+    '当前请求的用量未确定，系统会暂占额度。请等已有请求结束后重试；待处理用量可请管理员修正。',
+  allocationRiskPaused: '新请求暂缓',
+  allocationRiskExposure:
+    '本周期：{{inFlight}} 个进行中 · {{pending}} 个待确认用量 · 暂占 {{reserved}} {{unit}}',
+  allocationAdmissionRoom:
+    '放行余量：{{room}} {{unit}}（含临时缓冲，不是额外额度）',
+  allocationOlderPending:
+    '旧待处理记录：{{older}} 条；不占用本周期的放行余量。',
   allocationExhausted: '额度已耗尽',
   allocationUnavailable: '此用量分配已暂停、尚未生效或你已无权使用。',
-  allocationUnpriced: '模型价格尚未配置',
-  allocationEstimateHint:
-    '估算份额：1 点等于一个账号完整窗口额度的 1%。各窗口独立记账。近期用量会自动更新；长时间未确认时暂停新请求。进行中的请求可能超出剩余额度。',
-  allocationNoBalances:
-    '暂无余额记录。按比例分配时，请在用量分配生效后同步上游用量。',
-  allocationPoints: '点',
-  allocationPrimary: '主额度窗口',
-  allocationSecondary: '次额度窗口',
+  allocationUnpriced:
+    '此账号池没有可用的模型价格。请刷新账号模型，或将账号池限制为有价格的模型后重试。',
+  allocationUnknownWindowOverride:
+    '某项个人上限引用了已不存在的时间窗口条件。请刷新规则后重试。',
+  allocationRatioTokensBalanceHint:
+    '每个窗口的 Token 上限＝该窗口总预算 × 分配比例。这是内部额度，订阅账号的上游额度可能先耗尽。',
+  allocationRatioAmountBalanceHint:
+    '每个窗口的金额上限＝该窗口内部 USD 总预算 × 分配比例，不代表上游现金余额。',
+  allocationNoBalances: '暂无余额记录；规则生效后的请求才会计入用量。',
   allocationLimit: '分配额度',
   allocationUsed: '已用',
   allocationRemaining: '剩余',
   allocationResetAt: '重置时间：{{date}}',
   allocationActualTokens: '{{tokens}} M Token',
-  allocationSync: '同步上游用量',
-  allocationAwaitingSync: '等待上游额度变化',
   allocationCorrect: '修正用量',
   allocationSettle: '确认结算',
   allocationSettlementHint:
-    '请先同步上游数据。仅依据实际证据修正：填写请求的输入／输出／缓存 Token 总数，或各原始窗口的消耗点数。修正将被审计，且不能在此撤销。',
+    '仅依据实际证据修正请求的输入、输出和缓存输入 Token 总数。修正将被审计，且不能在此撤销。',
   allocationInputM: '输入 Token · M',
   allocationOutputM: '输出 Token · M',
   allocationCachedM: '缓存输入 · M',
-  allocationUnassignedHint:
-    '检测到无法归属成员的上游用量。确认按外部用量处理后，它不会记入任何成员，但仍会减少上游可用额度。',
-  allocationReserve: '确认外部消耗',
   allocationMoreMembers: '加载更多成员',
   allocationMine: '我的用量分配',
   allocationRefreshMine: '刷新我的用量分配',
@@ -143,9 +178,10 @@ export const zh: Record<keyof typeof en, string> = {
   auditAllocationSave: '保存用量分配',
   auditAllocationSettle: '结算用量分配记录',
   auditAllocationReconcile: '确认外部额度消耗',
+  auditAllocationDelete: '删除用量分配',
 
-  periodDaily: '每日 · UTC',
-  periodMonthly: '每月 · UTC',
+  periodDaily: '每日 · {{zone}}',
+  periodMonthly: '每月 · {{zone}}',
   auditMemberBudget: '更新 Token 额度',
   auditMemberBudgetSettle: '结算 Token 用量',
   reasonTokenQuota: '你的 Token 额度已耗尽，请等待重置或联系管理员。',
@@ -230,6 +266,16 @@ export const zh: Record<keyof typeof en, string> = {
   auditBackupVerify: '校验备份',
   systemSettings: '系统设置',
   systemSettingsDescription: '设置影响所有工作空间。',
+  timeZoneTitle: '时区',
+  timeZoneDescription:
+    '控制整个实例显示的时间和每日／每月用量分配的重置时间。历史运行统计图仍沿用 UTC 分组。',
+  timeZoneLabel: '实例时区',
+  timeZoneHint: '请输入 IANA 时区，例如 Asia/Shanghai。保存后立即生效。',
+  timeZonePreview: '当前时间：{{time}}（{{zone}}）',
+  timeZoneInvalid: '请输入有效的 IANA 时区。',
+  timeZoneSaveFailed: '无法保存时区，当前设置保持不变。',
+  timeZoneSaved: '时区已保存。',
+  timeZoneSave: '保存时区',
   codexVersionTitle: 'Codex 客户端版本',
   codexVersionDescription:
     '此配置影响整个实例的 Codex 模型发现与请求。版本检查只读取官方发布信息，不会安装软件。',
@@ -392,7 +438,7 @@ export const zh: Record<keyof typeof en, string> = {
   activityTitle: '时段分布',
   activityGrid: '按星期和小时统计的活跃度',
   activityNotCollected: '尚未采集',
-  activityCoverage: '小时统计始于 {{time}}（UTC），不包含此前的时段。',
+  activityCoverage: '小时统计始于 {{time}}（{{zone}}），不包含此前的时段。',
   activityKeys:
     '使用方向键切换小时和星期，Home 和 End 移动到当前行首尾，Ctrl 加 Home 或 End 移动到首个或末个格子。',
   activitySamples: '汇总小时窗口：{{count}}',
@@ -455,7 +501,7 @@ export const zh: Record<keyof typeof en, string> = {
   usageMembers: '成员',
   loadingUsageSummary: '正在加载用量概览…',
   usageSummaryFailed: '无法加载用量概览，请重试。',
-  usageTrackingSince: '统计始于 {{time}}（UTC），不包含此前的调用。',
+  usageTrackingSince: '统计始于 {{time}}（{{zone}}），不包含此前的调用。',
   usageRequests: '请求数',
   usageCompletionRate: '完成率',
   usageAverageDuration: '平均耗时',

@@ -20,6 +20,7 @@ import {
   DialogTrigger,
 } from './ui/Dialog'
 
+import { useTimeZone } from '@/lib/timezone'
 export function CatalogDialog({
   target,
   name,
@@ -56,6 +57,7 @@ function CatalogContent({
   name: string
 }) {
   const { t, i18n } = useTranslation()
+  const timeZone = useTimeZone()
   const client = useQueryClient()
   const options = catalogOptions(client, target)
   const query = useQuery(options)
@@ -205,6 +207,7 @@ function CatalogContent({
             <p className="text-xs text-muted-foreground">
               {t('catalogUpdated', {
                 time: new Intl.DateTimeFormat(i18n.resolvedLanguage ?? 'en', {
+                  timeZone,
                   dateStyle: 'short',
                   timeStyle: 'short',
                 }).format(data!.updated_at * 1000),

@@ -14,6 +14,7 @@ import {
 } from '@/lib/version'
 import { Button } from './ui/Button'
 import { Input } from './ui/Input'
+import { useTimeZone } from '@/lib/timezone'
 
 export function CodexVersion({ userID }: { userID: number }) {
   const { t } = useTranslation()
@@ -61,6 +62,7 @@ function VersionForm({
   updatedAt: number
 }) {
   const { t, i18n } = useTranslation()
+  const timeZone = useTimeZone()
   const client = useQueryClient()
   const options = versionOptions(client, userID)
   const [manual, setManual] = useState(value.manual_version)
@@ -107,6 +109,7 @@ function VersionForm({
   } as const
   const date = (timestamp: number) =>
     new Intl.DateTimeFormat(i18n.resolvedLanguage ?? 'en', {
+      timeZone,
       dateStyle: 'short',
       timeStyle: 'short',
     }).format(timestamp * 1000)

@@ -31,6 +31,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/DropdownMenu'
 
+import { useTimeZone } from '@/lib/timezone'
 export function Requests() {
   return <RequestHistory scope="personal" />
 }
@@ -56,6 +57,7 @@ function RequestTable({
   userID: number
 }) {
   const { t, i18n } = useTranslation()
+  const timeZone = useTimeZone()
   const client = useQueryClient()
   const personal = scope === 'personal'
   const [cursors, setCursors] = useState([0])
@@ -83,9 +85,11 @@ function RequestTable({
       client.getQueryData<AuthState>(authKey)?.user?.role === 'admin',
   })
   const dates = new Intl.DateTimeFormat(i18n.resolvedLanguage ?? 'en', {
+    timeZone,
     dateStyle: 'short',
   })
   const clock = new Intl.DateTimeFormat(i18n.resolvedLanguage ?? 'en', {
+    timeZone,
     timeStyle: 'medium',
   })
   const numbers = new Intl.NumberFormat(i18n.resolvedLanguage ?? 'en')

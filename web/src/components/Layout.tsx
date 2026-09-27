@@ -71,6 +71,7 @@ const navigation = [
         label: 'systemSettings',
         icon: Settings,
         children: [
+          { to: '/admin/settings/timezone', label: 'timeZoneTitle' },
           { to: '/admin/settings/codex', label: 'codexVersionTitle' },
           { to: '/admin/settings/backup', label: 'backupTitle' },
         ],

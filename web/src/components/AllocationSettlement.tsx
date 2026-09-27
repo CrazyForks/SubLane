@@ -10,6 +10,7 @@ import {
 } from '@/lib/allocations'
 import { Button } from './ui/Button'
 import { Input } from './ui/Input'
+
 export function AllocationSettlement({
   id,
   entry,
@@ -33,12 +34,7 @@ export function AllocationSettlement({
         <div className="min-w-0">
           <p className="break-all text-sm font-medium">{entry.request_id}</p>
           <p className="text-xs text-muted-foreground">
-            {entry.model} ·{' '}
-            {t(
-              entry.state === 'observed'
-                ? 'allocationAwaitingSync'
-                : 'allocationPending',
-            )}
+            {entry.model} · {t('allocationPending')}
           </p>
         </div>
         {!open && (
@@ -54,44 +50,24 @@ export function AllocationSettlement({
             e.preventDefault()
             if (mutation.isPending) return
             const form = new FormData(e.currentTarget)
-            const points: Record<number, number> = {}
-            let input = entry.input,
-              output = entry.output,
-              cached = entry.cached
-            let bad = false
-            if (entry.mode === 'ratio') {
-              for (const d of entry.debits) {
-                const v = d.reconciled
-                  ? d.points
-                  : parseAllocationValue(
-                      String(form.get(`window-${d.window_id}`) ?? ''),
-                      'ratio',
-                    )
-                if (v === null || v > 10000) bad = true
-                else points[d.window_id] = v
-              }
-            } else {
-              input =
-                parseAllocationValue(
-                  String(form.get('input') ?? ''),
-                  'tokens',
-                ) ?? -1
-              output =
-                parseAllocationValue(
-                  String(form.get('output') ?? ''),
-                  'tokens',
-                ) ?? -1
-              cached =
-                parseAllocationValue(
-                  String(form.get('cached') ?? ''),
-                  'tokens',
-                ) ?? -1
-              bad =
-                input < entry.input ||
-                output < entry.output ||
-                cached < 0 ||
-                cached > input
-            }
+            const input =
+              parseAllocationValue(String(form.get('input') ?? ''), 'tokens') ??
+              -1
+            const output =
+              parseAllocationValue(
+                String(form.get('output') ?? ''),
+                'tokens',
+              ) ?? -1
+            const cached =
+              parseAllocationValue(
+                String(form.get('cached') ?? ''),
+                'tokens',
+              ) ?? -1
+            const bad =
+              input < entry.input ||
+              output < entry.output ||
+              cached < 0 ||
+              cached > input
             setInvalid(bad)
             if (!bad)
               mutation.mutate({
@@ -99,7 +75,6 @@ export function AllocationSettlement({
                 input,
                 output,
                 cached,
-                points,
               })
           }}
         >
@@ -107,53 +82,28 @@ export function AllocationSettlement({
             disabled={mutation.isPending}
             className="grid gap-3 sm:grid-cols-3"
           >
-            {entry.mode === 'ratio'
-              ? entry.debits.map((d) => (
-                  <div key={d.window_id} className="space-y-2">
-                    <label
-                      htmlFor={`${entry.request_id}-${d.window_id}`}
-                      className="text-sm"
-                    >
-                      {t(
-                        d.kind === 'primary'
-                          ? 'allocationPrimary'
-                          : 'allocationSecondary',
-                      )}{' '}
-                      · {t('allocationPoints')}
-                    </label>
-                    <Input
-                      id={`${entry.request_id}-${d.window_id}`}
-                      name={`window-${d.window_id}`}
-                      inputMode="decimal"
-                      disabled={d.reconciled}
-                      defaultValue={
-                        d.reconciled ? allocationValue(d.points, 'ratio') : ''
-                      }
-                    />
-                  </div>
-                ))
-              : (['input', 'output', 'cached'] as const).map((key) => (
-                  <div key={key} className="space-y-2">
-                    <label
-                      htmlFor={`${entry.request_id}-${key}`}
-                      className="text-sm"
-                    >
-                      {t(
-                        key === 'input'
-                          ? 'allocationInputM'
-                          : key === 'output'
-                            ? 'allocationOutputM'
-                            : 'allocationCachedM',
-                      )}
-                    </label>
-                    <Input
-                      id={`${entry.request_id}-${key}`}
-                      name={key}
-                      inputMode="decimal"
-                      defaultValue={allocationValue(entry[key], 'tokens')}
-                    />
-                  </div>
-                ))}
+            {(['input', 'output', 'cached'] as const).map((key) => (
+              <div key={key} className="space-y-2">
+                <label
+                  htmlFor={`${entry.request_id}-${key}`}
+                  className="text-sm"
+                >
+                  {t(
+                    key === 'input'
+                      ? 'allocationInputM'
+                      : key === 'output'
+                        ? 'allocationOutputM'
+                        : 'allocationCachedM',
+                  )}
+                </label>
+                <Input
+                  id={`${entry.request_id}-${key}`}
+                  name={key}
+                  inputMode="decimal"
+                  defaultValue={allocationValue(entry[key], 'tokens')}
+                />
+              </div>
+            ))}
           </fieldset>
           {(invalid || mutation.isError) && (
             <p role="alert" className="text-sm text-error">

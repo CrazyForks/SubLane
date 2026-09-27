@@ -1,15 +1,31 @@
 import { useTranslation } from 'react-i18next'
 import { type AllocationDetail, allocationValue } from '@/lib/allocations'
 import { Status } from './Status'
+import { formatInstanceDate, useTimeZone } from '@/lib/timezone'
+
 export function AllocationBalances({ detail }: { detail: AllocationDetail }) {
   const { t, i18n } = useTranslation()
+  const timeZone = useTimeZone()
   const date = (n: number) =>
-    new Date(n * 1000).toLocaleString(i18n.resolvedLanguage ?? 'en')
+    formatInstanceDate(n * 1000, i18n.resolvedLanguage ?? 'en', timeZone, {
+      dateStyle: 'short',
+      timeStyle: 'medium',
+    })
+  const members = new Map<number, AllocationDetail['balances']>()
+  for (const balance of detail.balances) {
+    const windows = members.get(balance.user_id) ?? []
+    windows.push(balance)
+    members.set(balance.user_id, windows)
+  }
   return (
     <div className="space-y-4">
       {detail.config.mode === 'ratio' && (
         <p className="text-sm leading-6 text-muted-foreground">
-          {t('allocationEstimateHint')}
+          {t(
+            detail.config.ratio_unit === 'amount'
+              ? 'allocationRatioAmountBalanceHint'
+              : 'allocationRatioTokensBalanceHint',
+          )}
         </p>
       )}
       {!detail.available && (
@@ -23,118 +39,193 @@ export function AllocationBalances({ detail }: { detail: AllocationDetail }) {
         </p>
       ) : (
         <div className="divide-y divide-border">
-          {detail.balances.map((b) => {
+          {[...members].map(([userID, windows]) => {
+            const b = windows[0]
             const state = !detail.available
               ? 'allocationUnavailableShort'
-              : b.pending > 0 || detail.unassigned > 0
-                ? 'allocationPending'
-                : b.sync_paused
-                  ? 'allocationSyncPaused'
-                  : b.used >= b.limit
-                    ? 'allocationExhausted'
-                    : (b.syncing ?? 0) > 0
-                      ? 'allocationUpdating'
-                      : 'active'
-            const unit =
-              b.mode === 'ratio'
-                ? t('allocationPoints')
-                : b.mode === 'amount'
-                  ? 'USD'
-                  : 'M'
+              : windows.some((window) => window.admission === 'exhausted')
+                ? 'allocationExhausted'
+                : windows.some((window) => window.admission === 'risk_limited')
+                  ? 'allocationRiskPaused'
+                  : 'active'
             return (
-              <section
-                key={`${b.user_id}-${b.window_id}`}
-                className="space-y-3 py-4"
-              >
+              <section key={userID} className="space-y-3 py-4">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <h3 className="break-words text-sm font-medium">
                     {b.username}
-                    {b.account_label &&
-                      ` · ${t('allocationSubscription', { label: b.account_label })}`}
-                    {b.window_kind &&
-                      ` · ${b.window_kind === 'primary' ? t('allocationPrimary') : t('allocationSecondary')}`}
-                    {b.account_id && (
-                      <span className="ml-2 text-xs text-muted-foreground">
-                        {b.account_id.slice(0, 8)}
-                      </span>
-                    )}
                   </h3>
                   <Status
                     kind={
                       state === 'allocationUnavailableShort'
                         ? 'neutral'
-                        : state === 'allocationPending' ||
-                            state === 'allocationSyncPaused'
+                        : state === 'allocationRiskPaused'
                           ? 'warning'
                           : state === 'allocationExhausted'
                             ? 'error'
-                            : state === 'allocationUpdating'
-                              ? 'info'
-                              : 'success'
+                            : 'success'
                     }
                   >
                     {t(state)}
                   </Status>
                 </div>
-                <dl className="grid grid-cols-3 gap-3 text-sm">
-                  <div>
-                    <dt className="text-muted-foreground">
-                      {t('allocationLimit')}
-                    </dt>
-                    <dd className="mt-1 tabular-nums">
-                      {allocationValue(b.limit, b.mode)} {unit}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt className="text-muted-foreground">
-                      {t(
-                        b.mode === 'ratio'
-                          ? 'allocationEstimatedUsed'
-                          : 'allocationUsed',
+                {windows.map((window, index) => {
+                  const unit = window.mode === 'amount' ? 'USD' : 'M'
+                  return (
+                    <div
+                      key={`${window.window_kind}-${window.window_seconds}`}
+                      className={
+                        index > 0
+                          ? 'space-y-3 border-t border-border pt-3'
+                          : 'space-y-3'
+                      }
+                    >
+                      {(windows.length > 1 ||
+                        detail.config.mode === 'windows') && (
+                        <div className="flex flex-wrap items-center justify-between gap-2 text-sm font-medium">
+                          <h4>
+                            {t(
+                              window.window_seconds % 86400 === 0
+                                ? 'allocationDurationDays'
+                                : 'allocationDurationHours',
+                              {
+                                value:
+                                  window.window_seconds % 86400 === 0
+                                    ? window.window_seconds / 86400
+                                    : window.window_seconds / 3600,
+                              },
+                            )}
+                          </h4>
+                          {(window.admission === 'exhausted' ||
+                            window.admission === 'risk_limited') && (
+                            <span
+                              className={
+                                window.admission === 'exhausted'
+                                  ? 'text-error'
+                                  : 'text-warning'
+                              }
+                            >
+                              {t(
+                                window.admission === 'exhausted'
+                                  ? 'allocationWindowReached'
+                                  : 'allocationWindowRisk',
+                              )}
+                            </span>
+                          )}
+                        </div>
                       )}
-                    </dt>
-                    <dd className="mt-1 tabular-nums">
-                      {allocationValue(b.used, b.mode)} {unit}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt className="text-muted-foreground">
-                      {t(
-                        b.mode === 'ratio'
-                          ? 'allocationEstimatedRemaining'
-                          : 'allocationRemaining',
-                      )}
-                    </dt>
-                    <dd className="mt-1 tabular-nums">
-                      {allocationValue(Math.max(0, b.limit - b.used), b.mode)}{' '}
-                      {unit}
-                    </dd>
-                  </div>
-                </dl>
-                {b.mode === 'ratio' && (b.borrowed ?? 0) > 0 && (
-                  <p className="text-xs leading-5 text-muted-foreground">
-                    {t('allocationBorrowed', {
-                      points: allocationValue(b.borrowed ?? 0, 'ratio'),
-                    })}
-                  </p>
-                )}
-                {b.mode === 'ratio' && state === 'allocationExhausted' && (
+                      <dl className="grid grid-cols-3 gap-3 text-sm">
+                        <div>
+                          <dt className="text-muted-foreground">
+                            {t('allocationLimit')}
+                          </dt>
+                          <dd className="mt-1 tabular-nums">
+                            {window.admission === 'unlimited'
+                              ? t('allocationUnlimited')
+                              : `${allocationValue(window.limit, window.mode)} ${unit}`}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt className="text-muted-foreground">
+                            {t('allocationUsed')}
+                          </dt>
+                          <dd className="mt-1 tabular-nums">
+                            {allocationValue(window.used, window.mode)} {unit}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt className="text-muted-foreground">
+                            {t('allocationRemaining')}
+                          </dt>
+                          <dd
+                            className="mt-1 tabular-nums"
+                            aria-label={
+                              window.admission === 'unlimited'
+                                ? t('allocationUnlimited')
+                                : undefined
+                            }
+                          >
+                            {window.admission === 'unlimited'
+                              ? '—'
+                              : `${allocationValue(Math.max(0, window.limit - window.used), window.mode)} ${unit}`}
+                          </dd>
+                        </div>
+                      </dl>
+                      {(window.in_flight > 0 || window.pending_current > 0) &&
+                        window.admission === 'unlimited' && (
+                          <p className="text-sm leading-6 text-muted-foreground">
+                            {t('allocationUnmeteredExposure', {
+                              inFlight: window.in_flight,
+                              pending: window.pending_current,
+                            })}
+                          </p>
+                        )}
+                      {(window.in_flight > 0 || window.pending_current > 0) &&
+                        window.admission !== 'unlimited' && (
+                          <div className="space-y-1 text-sm leading-6 text-muted-foreground">
+                            <p>
+                              {t('allocationRiskExposure', {
+                                inFlight: window.in_flight,
+                                pending: window.pending_current,
+                                reserved: allocationValue(
+                                  window.reserved,
+                                  window.mode,
+                                ),
+                                unit,
+                              })}
+                            </p>
+                            <p>
+                              {t('allocationAdmissionRoom', {
+                                room: allocationValue(
+                                  window.admission_room,
+                                  window.mode,
+                                ),
+                                unit,
+                              })}
+                            </p>
+                          </div>
+                        )}
+                      {detail.available &&
+                        window.admission === 'risk_limited' && (
+                          <p className="text-sm leading-6 text-warning">
+                            {t('allocationRiskLimit')}
+                          </p>
+                        )}
+                      <p className="text-xs leading-5 text-muted-foreground">
+                        {detail.config.period === 'durations'
+                          ? timeZone
+                          : detail.config.period === 'day'
+                            ? t('allocationDailySchedule', {
+                                time: detail.config.reset_time ?? '00:00',
+                                zone: timeZone,
+                              })
+                            : t('allocationMonthlySchedule', {
+                                day: detail.config.reset_day ?? 1,
+                                time: detail.config.reset_time ?? '00:00',
+                                zone: timeZone,
+                              })}{' '}
+                        ·{' '}
+                        {t('allocationResetAt', {
+                          date: date(window.reset_at),
+                        })}
+                        {window.mode === 'amount' &&
+                          ` · ${t('allocationActualTokens', { tokens: allocationValue(window.tokens, 'tokens') })}`}
+                      </p>
+                    </div>
+                  )
+                })}
+                {detail.config.mode === 'windows' && b.pending > 0 && (
                   <p className="text-sm leading-6 text-muted-foreground">
-                    {t('allocationAccountExhausted')}
+                    {t('allocationWindowPendingHint', { pending: b.pending })}
                   </p>
                 )}
-                {state === 'allocationSyncPaused' && (
-                  <p className="text-sm leading-6 text-muted-foreground">
-                    {t('allocationSyncPausedHint')}
-                  </p>
-                )}
-                <p className="text-xs leading-5 text-muted-foreground">
-                  {detail.config.period !== 'upstream' &&
-                    `${t(detail.config.period === 'day' ? 'periodDaily' : 'periodMonthly')} · `}
-                  {t('allocationResetAt', { date: date(b.reset_at) })}
-                  {b.mode !== 'tokens' &&
-                    ` · ${t('allocationActualTokens', { tokens: allocationValue(b.tokens, 'tokens') })}`}
-                </p>
+                {detail.config.mode !== 'windows' &&
+                  b.pending > b.pending_current && (
+                    <p className="text-sm leading-6 text-muted-foreground">
+                      {t('allocationOlderPending', {
+                        older: b.pending - b.pending_current,
+                      })}
+                    </p>
+                  )}
               </section>
             )
           })}

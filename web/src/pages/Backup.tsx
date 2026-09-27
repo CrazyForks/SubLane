@@ -18,6 +18,7 @@ import { useAdminMutation } from '@/hooks/use-admin-mutation'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { Status } from '@/components/Status'
+import { useTimeZone } from '@/lib/timezone'
 
 export function Backup() {
   const { data } = useQuery(authOptions())
@@ -62,6 +63,7 @@ function BackupForm({
   userID: number
 }) {
   const { t, i18n } = useTranslation()
+  const timeZone = useTimeZone()
   const client = useQueryClient()
   const [file, setFile] = useState<File | null>(null)
   const [verified, setVerified] = useState<BackupInfo | null>(null)
@@ -102,6 +104,7 @@ function BackupForm({
     restore.reset()
   }
   const date = new Intl.DateTimeFormat(i18n.resolvedLanguage ?? 'en', {
+    timeZone,
     dateStyle: 'medium',
     timeStyle: 'short',
   })

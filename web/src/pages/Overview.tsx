@@ -6,9 +6,11 @@ import { formatDuration } from '@/lib/duration'
 import { Button } from '@/components/ui/Button'
 import { Status } from '@/components/Status'
 import { GatewaySetup } from '@/components/GatewaySetup'
+import { useTimeZone } from '@/lib/timezone'
 
 export function Overview() {
   const { t, i18n } = useTranslation()
+  const timeZone = useTimeZone()
   const query = useQuery({
     queryKey: ['system'],
     queryFn: ({ signal }) => getSystem(signal),
@@ -120,6 +122,7 @@ export function Overview() {
                 className="tabular-nums"
               >
                 {new Intl.DateTimeFormat(locale, {
+                  timeZone,
                   hour: '2-digit',
                   minute: '2-digit',
                   second: '2-digit',

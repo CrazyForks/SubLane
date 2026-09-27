@@ -5,6 +5,7 @@ import { request } from './request'
 export const auditActions: Record<string, keyof typeof en> = {
   'allocation.save': 'auditAllocationSave',
   'allocation.settle': 'auditAllocationSettle',
+  'allocation.delete': 'auditAllocationDelete',
   'allocation.reconcile': 'auditAllocationReconcile',
   'backup.export': 'auditBackupExport',
   'backup.prepare': 'auditBackupPrepare',

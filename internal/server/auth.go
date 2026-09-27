@@ -15,6 +15,7 @@ import (
 	"github.com/murongg/SubLane/internal/audit"
 	"github.com/murongg/SubLane/internal/auth"
 	"github.com/murongg/SubLane/internal/tenants"
+	"github.com/murongg/SubLane/internal/timezone"
 )
 
 const sessionCookie = "sublane_session"
@@ -23,6 +24,7 @@ type authHTTP struct {
 	audit     *audit.Service
 	service   *auth.Service
 	tenants   *tenants.Service
+	timeZone  *timezone.Service
 	tenantID  int64
 	publicURL string
 	limiter   *loginLimiter
@@ -155,7 +157,18 @@ func (h *authHTTP) state(w http.ResponseWriter, r *http.Request) {
 		authError(w, err)
 		return
 	}
-	writeJSON(w, 200, state)
+	h.writeState(w, 200, state)
+}
+
+func (h *authHTTP) writeState(w http.ResponseWriter, status int, state auth.State) {
+	name := "UTC"
+	if h.timeZone != nil {
+		name = h.timeZone.Name()
+	}
+	writeJSON(w, status, struct {
+		auth.State
+		TimeZone string `json:"time_zone"`
+	}{State: state, TimeZone: name})
 }
 
 func (h *authHTTP) stateForTenant(ctx context.Context, sessionToken string) (auth.State, error) {
@@ -229,7 +242,7 @@ func (h *authHTTP) authenticate(w http.ResponseWriter, r *http.Request, setup bo
 		return
 	}
 	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: session.Token, Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode, Secure: h.secure(r), MaxAge: int(auth.SessionTTL.Seconds()), Expires: session.ExpiresAt})
-	writeJSON(w, status, scoped)
+	h.writeState(w, status, scoped)
 }
 
 func (h *authHTTP) logout(w http.ResponseWriter, r *http.Request) {
@@ -243,7 +256,7 @@ func (h *authHTTP) logout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: "", Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode, Secure: h.secure(r), MaxAge: -1, Expires: time.Unix(1, 0)})
-	writeJSON(w, 200, auth.State{Initialized: true})
+	h.writeState(w, 200, auth.State{Initialized: true})
 }
 
 func (h *authHTTP) registerInvitation(w http.ResponseWriter, r *http.Request) {
@@ -271,7 +284,7 @@ func (h *authHTTP) registerInvitation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: session.Token, Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode, Secure: h.secure(r), MaxAge: int(auth.SessionTTL.Seconds()), Expires: session.ExpiresAt})
-	writeJSON(w, 201, state)
+	h.writeState(w, 201, state)
 }
 
 type sessionUserKey struct{}

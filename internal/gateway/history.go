@@ -199,8 +199,6 @@ func (e *observation) finish(outcome, code, penalty, retry string) {
 				s.allocationFailure = true
 			}
 			slog.Error("Unable to persist request metadata")
-		} else if e.allocationTracked {
-			s.scheduleAllocationSync(e.schemeID, e.record.AccountID)
 		}
 	})
 }
@@ -216,7 +214,7 @@ func classify(ctx context.Context, err error) (outcome, code, penalty string) {
 		return statusOutcome(rejected.Status)
 	}
 	switch {
-	case errors.Is(err, allocations.ErrQuota), errors.Is(err, allocations.ErrPending), errors.Is(err, allocations.ErrSync), errors.Is(err, allocations.ErrUnavailable), errors.Is(err, allocations.ErrUnpriced), errors.Is(err, allocations.ErrSnapshot):
+	case errors.Is(err, allocations.ErrQuota), errors.Is(err, allocations.ErrPending), errors.Is(err, allocations.ErrRisk), errors.Is(err, allocations.ErrUnavailable), errors.Is(err, allocations.ErrUnpriced):
 		return "rejected", err.Error(), ""
 	case errors.Is(err, ErrMemberBusy):
 		return "rejected", "member_busy", ""

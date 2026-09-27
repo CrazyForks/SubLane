@@ -13,6 +13,7 @@ export const system = {
 
 export const authenticated = {
   initialized: true,
+  time_zone: 'UTC',
   user: { id: 1, username: 'admin-test', role: 'admin' as const },
 }
 
@@ -22,10 +23,11 @@ export const workspaces = {
 
 export const memberAuthenticated = {
   initialized: true,
+  time_zone: 'UTC',
   user: { id: 2, username: 'member-test', role: 'member' as const },
 }
 
-export const anonymous = { initialized: true, user: null }
+export const anonymous = { initialized: true, time_zone: 'UTC', user: null }
 
 export const hourlyActivity = {
   tracking_since: 1900000000,

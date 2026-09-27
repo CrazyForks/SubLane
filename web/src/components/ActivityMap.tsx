@@ -10,6 +10,7 @@ import {
 } from '@/lib/statistics'
 
 import { heatmapTone } from '@/lib/heatmap'
+import { useTimeZone } from '@/lib/timezone'
 import { HeatmapLegend } from './HeatmapLegend'
 
 function amount(cell: ActivityCell, metric: UsageMetric) {
@@ -24,6 +25,7 @@ export function ActivityMap({
   metric: UsageMetric
 }) {
   const { t, i18n } = useTranslation()
+  const timeZone = useTimeZone()
   const title = useId()
   const help = useId()
   const buttons = useRef<(HTMLButtonElement | null)[]>([])
@@ -41,7 +43,7 @@ export function ActivityMap({
   const date = new Intl.DateTimeFormat(locale, {
     dateStyle: 'medium',
     timeStyle: 'short',
-    timeZone: 'UTC',
+    timeZone,
   })
   const values = activity.cells.map((cell) => amount(cell, metric))
   const maximum = Math.max(1, ...values.map((value) => value ?? 0))
@@ -110,6 +112,7 @@ export function ActivityMap({
       <p className="text-xs text-muted-foreground">
         {t('activityCoverage', {
           time: date.format(activity.tracking_since * 1000),
+          zone: timeZone,
         })}
       </p>
       <div className="overflow-x-auto px-1 py-1">

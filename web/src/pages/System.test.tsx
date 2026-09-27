@@ -103,3 +103,16 @@ it.each(['/admin/settings', '/admin/settings/codex'])(
     ).toBe('page')
   },
 )
+
+it('opens the instance time zone page from the system submenu', async () => {
+  session()
+  open('/admin/settings/timezone')
+  expect(
+    await screen.findByRole('combobox', { name: 'Instance time zone' }),
+  ).toHaveProperty('value', 'UTC')
+  expect(
+    screen
+      .getByRole('link', { name: 'Time zone' })
+      .getAttribute('aria-current'),
+  ).toBe('page')
+})

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/murongg/SubLane/internal/allocations"
 	"github.com/murongg/SubLane/internal/gateway"
 )
 
@@ -40,6 +41,14 @@ func TestQuotaErrorHasBoundedRetryAndSafeReason(t *testing.T) {
 	gatewayError(w, &gateway.QuotaError{RetryAfter: 90})
 	if w.Code != 429 || w.Header().Get("Retry-After") != "90" || !strings.Contains(w.Body.String(), "quota_exhausted") {
 		t.Fatal(w.Code, w.Body.String())
+	}
+}
+
+func TestAllocationRiskLimitExplainsTemporaryAdmissionPause(t *testing.T) {
+	w := httptest.NewRecorder()
+	gatewayError(w, allocations.ErrRisk)
+	if w.Code != 429 || !strings.Contains(w.Body.String(), "allocation_risk_limit") || w.Header().Get("Retry-After") != "" {
+		t.Fatal(w.Code, w.Body.String(), w.Header())
 	}
 }
 

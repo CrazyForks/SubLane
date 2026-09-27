@@ -14,12 +14,15 @@ import {
 } from '@/lib/allocations'
 import { groupOptions, poolMembersOptions } from '@/lib/groups'
 import { SchemeForm } from '@/components/SchemeForm'
+import { AllocationPriceWarning } from '@/components/AllocationPriceWarning'
 import { AllocationReport } from '@/components/AllocationReport'
 import { Button } from '@/components/ui/Button'
 import { Status } from '@/components/Status'
+import { formatInstanceDate, useTimeZone } from '@/lib/timezone'
 
 export function Allocations() {
   const { t, i18n } = useTranslation()
+  const timeZone = useTimeZone()
   const query = useQuery(schemesOptions)
   const pools = useQuery(groupOptions)
   const client = useQueryClient()
@@ -52,8 +55,15 @@ export function Allocations() {
   })
   const loading = query.isPending || pools.isPending
   const failed = query.isError || pools.isError
+  const editingScheme = editing
+    ? (query.data?.schemes.find((scheme) => scheme.id === editing.id) ??
+      editing)
+    : undefined
   const date = (n: number) =>
-    new Date(n * 1000).toLocaleString(i18n.resolvedLanguage ?? 'en')
+    formatInstanceDate(n * 1000, i18n.resolvedLanguage ?? 'en', timeZone, {
+      dateStyle: 'short',
+      timeStyle: 'medium',
+    })
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -115,7 +125,7 @@ export function Allocations() {
             groupID={formPoolID}
             onGroupChange={setFormPoolID}
             members={roster.data?.members ?? []}
-            scheme={editing ?? undefined}
+            scheme={editingScheme}
             onSubmit={(input) => mutation.mutate({ ...input, id: editing?.id })}
             onCancel={() => setEditing(undefined)}
             pending={mutation.isPending || roster.isPending || roster.isError}
@@ -195,21 +205,60 @@ export function Allocations() {
                 </div>
                 <p className="break-words text-sm text-muted-foreground">
                   {s.group_name} ·{' '}
-                  {t(
-                    s.config.period === 'upstream'
-                      ? 'allocationUpstreamReset'
-                      : s.config.period === 'day'
-                        ? 'periodDaily'
-                        : 'periodMonthly',
-                  )}
+                  {s.config.period === 'durations'
+                    ? t('allocationWindowSchedule', {
+                        windows: s.config.windows?.length ?? 0,
+                        zone: timeZone,
+                      })
+                    : s.config.period === 'day'
+                      ? t('allocationDailySchedule', {
+                          time: s.config.reset_time ?? '00:00',
+                          zone: timeZone,
+                        })
+                      : t('allocationMonthlySchedule', {
+                          day: s.config.reset_day ?? 1,
+                          time: s.config.reset_time ?? '00:00',
+                          zone: timeZone,
+                        })}
                 </p>
                 {s.next && (
                   <p className="text-sm text-muted-foreground">
                     {t('allocationScheduled', {
                       mode: t(modeLabels[s.next.config.mode]),
                       date: date(s.next.effective_at),
-                    })}
+                    })}{' '}
+                    ·{' '}
+                    {s.next.config.period === 'durations'
+                      ? t('allocationWindowSchedule', {
+                          windows: s.next.config.windows?.length ?? 0,
+                          zone: timeZone,
+                        })
+                      : s.next.config.period === 'day'
+                        ? t('allocationDailySchedule', {
+                            time: s.next.config.reset_time ?? '00:00',
+                            zone: timeZone,
+                          })
+                        : t('allocationMonthlySchedule', {
+                            day: s.next.config.reset_day ?? 1,
+                            time: s.next.config.reset_time ?? '00:00',
+                            zone: timeZone,
+                          })}
                   </p>
+                )}
+                {s.effective_at <= query.dataUpdatedAt / 1000 && (
+                  <AllocationPriceWarning
+                    coverage={s.price_coverage}
+                    label={s.next ? t('allocationCurrentPricing') : undefined}
+                    effectiveAt={s.edit_effective_at}
+                  />
+                )}
+                {s.next && (
+                  <AllocationPriceWarning
+                    coverage={s.next.price_coverage}
+                    label={t('allocationScheduledPricing')}
+                    effectiveAt={s.next.effective_at}
+                    timing="scheduled"
+                  />
                 )}
               </div>
               <div className="flex flex-wrap gap-2">

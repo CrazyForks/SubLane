@@ -16,9 +16,11 @@ import { CreateMember } from '@/components/CreateMember'
 import { GroupAccess } from '@/components/GroupAccess'
 import { MemberActions } from '@/components/MemberActions'
 import { MembershipEditor } from '@/components/MembershipEditor'
+import { useTimeZone } from '@/lib/timezone'
 
 export function Members() {
   const { t, i18n } = useTranslation()
+  const timeZone = useTimeZone()
   const client = useQueryClient()
   const session = useQuery(authOptions())
   const canResetPasswords =
@@ -263,6 +265,7 @@ export function Members() {
                       ).toISOString()}
                     >
                       {new Intl.DateTimeFormat(i18n.resolvedLanguage ?? 'en', {
+                        timeZone,
                         dateStyle: 'medium',
                       }).format(member.created_at * 1000)}
                     </time>

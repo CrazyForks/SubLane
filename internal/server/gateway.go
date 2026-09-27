@@ -290,12 +290,10 @@ func gatewayFailure(err error) (int, string) {
 		return 409, "conversation_account_unavailable"
 	case errors.Is(err, gateway.ErrNoAccount):
 		return 503, "no_accounts_available"
-	case errors.Is(err, allocations.ErrQuota), errors.Is(err, allocations.ErrPending), errors.Is(err, allocations.ErrSync):
+	case errors.Is(err, allocations.ErrQuota), errors.Is(err, allocations.ErrPending), errors.Is(err, allocations.ErrRisk):
 		return 429, err.Error()
 	case errors.Is(err, allocations.ErrUnavailable):
 		return 403, err.Error()
-	case errors.Is(err, allocations.ErrSnapshot):
-		return 503, err.Error()
 	case errors.Is(err, allocations.ErrUnpriced):
 		return 403, err.Error()
 	case errors.Is(err, gateway.ErrAllocationAccounting):
@@ -352,7 +350,7 @@ func writeGatewayFailure(w http.ResponseWriter, err error, writeError func(http.
 	if status == 401 {
 		w.Header().Set("WWW-Authenticate", "Bearer")
 	}
-	if status == 429 && !errors.Is(err, allocations.ErrPending) && !errors.Is(err, allocations.ErrSync) && !errors.Is(err, allocations.ErrQuota) {
+	if status == 429 && !errors.Is(err, allocations.ErrPending) && !errors.Is(err, allocations.ErrQuota) && !errors.Is(err, allocations.ErrRisk) {
 		value := "1"
 		var rejected *upstream.UpstreamError
 		if errors.As(err, &rejected) {

@@ -23,123 +23,161 @@ export const en = {
     'Grant members access to this account pool before assigning an allowance.',
   allocationSchemes: 'Resource allowances',
   allocationsDescription:
-    'Optional usage limits for members with access to an account pool.',
+    'Optional limits by share of a token or internal USD budget, or by direct member allowance.',
   allocationCreate: 'Add resource allowance',
   allocationEdit: 'Edit resource allowance',
   allocationEditNamed: 'Edit resource allowance {{name}}',
   allocationName: 'Resource allowance name',
   allocationMode: 'Allowance type',
   allocationRatio: 'By share',
+  allocationRatioUnit: 'Share basis',
+  allocationRatioTokens: 'By token share',
+  allocationRatioAmount: 'By amount share',
   allocationShares: 'Member shares',
   allocationSplitEqually: 'Split equally',
-  allocationSettings: 'Metering and activation settings',
-  allocationShareRules:
-    'The same shares apply to every subscription in this pool. Each window resets separately. Idle shares can be borrowed only when enabled below.',
-  allocationAllowIdleBorrow: 'Allow idle share borrowing',
-  allocationAllowIdleBorrowHint:
-    'A member may use another member’s unused share on this account window. Sessions stay on their current subscription; borrowing is recorded separately and confirmed when quota sync settles.',
-  allocationSubscription: 'Subscription {{label}}',
-  allocationUpdating: 'Usage updating',
-  allocationSyncPaused: 'Waiting for quota sync',
-  allocationSyncPausedHint:
-    'New requests on this subscription are paused until its quota can be confirmed. Retry shortly; contact the administrator if this persists.',
-  allocationAutomaticHint:
-    '{{count}} completed requests are waiting for upstream quota updates. SubLane retries automatically; no manual entry is needed during normal syncing.',
-  allocationEstimatedUsed: 'Estimated used',
-  allocationEstimatedRemaining: 'Estimated remaining',
-  allocationAccountExhausted:
-    'Your share on this subscription window is exhausted. This does not mean every subscription in the pool is exhausted. Existing conversations keep their subscription.',
-  allocationBorrowed: 'Borrowed {{points}} points from idle member share.',
+  allocationSectionDetails: 'Rule details',
+  allocationSectionPolicy: 'Allowance and reset',
+  allocationSectionActivation: 'Activation',
+  allocationModeRatioSummary: 'Split one budget by member percentage',
+  allocationModeAmountSummary: 'Give each member a USD limit',
+  allocationModeTokensSummary: 'Give each member a Token limit',
+  allocationModeWindowsSummary: 'Set multiple USD limits by duration',
   allocationAmount: 'By amount',
   allocationTokens: 'By tokens',
+  allocationWindows: 'By time window',
+  allocationWindowConditions: 'Time-window conditions',
+  allocationWindowConditionsHint:
+    'Add up to 8 windows. Each has its own duration and shared USD limit; blank means unlimited.',
+  allocationAddCondition: 'Add condition',
+  allocationCondition: 'Condition {{index}}',
+  allocationConditionDuration: 'Duration for condition {{index}}',
+  allocationConditionUnit: 'Unit for condition {{index}}',
+  allocationConditionLimit: 'Shared limit for condition {{index}}',
+  allocationRemoveCondition: 'Remove condition {{index}}',
+  allocationHours: 'Hours',
+  allocationDays: 'Days',
+  allocationDurationHours: '{{value}} hours',
+  allocationDurationDays: '{{value}} days',
+  allocationOverrideWindow: 'Override {{duration}} for {{name}}',
+  allocationWindowFor: '{{duration}} limit for {{name}}',
+  allocationWindowDurationHint:
+    'Each window starts when the rule takes effect and renews after its own duration. Times are shown in {{zone}} and can differ from upstream resets.',
+  allocationFutureEditDelay:
+    'Future edits may wait up to {{duration}} before taking effect, based on the longest current window.',
+  allocationAutoPricingHint:
+    'Model prices are filled automatically from the models supported by the selected account pool when you save.',
   allocationSave: 'Save resource allowance',
   allocationView: 'View usage',
   allocationBack: 'Back to resource allowances',
   allocationsEmpty:
     'Create a dedicated account pool and grant members access to add a resource allowance.',
-  allocationRatioHint:
-    'Set how much each member may use, such as 50%, 30% and 20%. You do not need to know the subscription’s total token capacity.',
-  allocationAmountHint:
-    'Charge usage at your configured model prices in USD. This is an internal allowance, not an upstream cash balance.',
-  allocationTokensHint:
-    'Count input plus output tokens. 1 M = 1,000,000 tokens. Cached input is not counted twice.',
+  allocationTotalBudget: 'Total budget',
+  allocationSelectAllMembers: 'Select all members',
+  allocationIncludeMember: 'Include {{name}}',
+  allocationOverrideMember: 'Override limits for {{name}}',
+  allocationOverrideLimits: 'Set personal limits',
+  allocationTotalAmountHint:
+    'This is an internal USD budget calculated from saved model prices, not an upstream cash balance.',
+  allocationTotalTokensHint:
+    'This is a budget you choose, not the subscription’s actual token capacity. 1 M = 1,000,000 tokens.',
+  allocationRatioTokenRule:
+    'Each member receives their percentage of the total token budget for the selected period.',
+  allocationRatioAmountRule:
+    'Each member receives their percentage of the total internal USD budget for the selected period.',
   allocationExclusiveHint:
     'Use a dedicated pool and remove its accounts from every other pool first. After adding an allowance, the pool and its account membership stay fixed. Existing unbound keys for this pool stop working.',
   allocationMembers: 'Member allowances',
   allocationBlankHint:
-    'Leave a member blank if they should not use this resource allowance.',
+    'Select members who should receive this allowance, then enter a limit or percentage for each selected member.',
   allocationFor: 'Allowance for {{name}}',
-  allocationTotal: 'Allocated {{total}}% · Reserved {{remaining}}%',
+  allocationTotal: 'Allocated {{total}}% · Unallocated {{remaining}}%',
   allocationPeriod: 'Reset period',
-  allocationUpstreamReset: 'Follows each upstream quota window',
-  allocationRates: 'Model prices and weights',
-  allocationRatesHint:
-    'Select a model available in this account pool to fill its catalog prices. Switching models replaces the prices. You can edit them before saving; the saved revision keeps its own snapshot.',
-  allocationAutoRatesHint:
-    'Usage is estimated from upstream quota changes. Model weights are configured automatically; API prices are not the provider’s subscription charging formula.',
-  allocationAdvancedRates: 'Advanced: customize model weights',
-  allocationPriceLoading: 'Loading model price…',
-  allocationRateInput: 'Input · USD / M',
-  allocationRateCached: 'Cached input · USD / M',
-  allocationRateOutput: 'Output · USD / M',
-  allocationAddRate: 'Add model price',
-  allocationAddAllRates: 'Add all available models ({{count}})',
-  allocationRateLimit: 'Up to 128 model prices can be configured.',
-  allocationRemoveRate: 'Remove model price {{index}}',
+  allocationWindowSchedule: '{{windows}} time windows · {{zone}}',
+  allocationWindowReached: 'Limit reached',
+  allocationWindowRisk: 'New requests paused',
+  allocationUnlimited: 'Unlimited',
+  allocationUnmeteredExposure:
+    'This window: {{inFlight}} in flight · {{pending}} awaiting usage',
+  allocationWindowPendingHint:
+    'Pending records across this allowance: {{pending}}. Each window counts only records within its own duration.',
+  allocationWindowBlankHint:
+    'Only selected members may use this allowance. A blank amount in a shared or personal condition means unlimited use for that condition.',
+  allocationResetDay: 'Day of month',
+  allocationResetTime: 'Reset time',
+  allocationResetZoneHint: 'Times use the instance time zone ({{zone}}).',
+  allocationResetShortMonthHint:
+    'If a month has fewer days, it resets on the last day.',
+  allocationDailySchedule: 'Daily at {{time}} · {{zone}}',
+  allocationMonthlySchedule: 'Monthly on day {{day}} at {{time}} · {{zone}}',
   allocationRemove: 'Remove',
-  allocationModelID: 'Model ID',
-  allocationChooseModel: 'Select a model',
-  allocationPriceMissing:
-    'No catalog price for this model. Enter prices manually.',
-  allocationPriceFailed: 'Could not load model prices. Enter prices manually.',
   allocationEnabled: 'Enable this resource allowance',
   allocationNextHint:
-    'Changes to allowances, prices or type take effect next period. Pausing or enabling access takes effect immediately. Current usage and unsettled entries remain recorded.',
+    'Changes to allowances, prices, type or reset schedule take effect next period. Pausing or enabling access takes effect immediately. Current usage and unsettled entries remain recorded.',
+  allocationEditEffectivePreview:
+    'With the current schedule, changes saved now are expected to take effect on {{date}}. Pausing or enabling access takes effect immediately.',
+  allocationStartEffectivePreview:
+    'If saved now, this rule is expected to start on {{date}}.',
+  allocationMissingPrices:
+    'Saved model prices are in use because current catalog prices are missing ({{count}}): {{models}}. Refresh the price catalog to update future revisions.',
+  allocationUncoveredModels:
+    'Supported models absent from this rule’s saved prices ({{count}}): {{models}}. Save the allowance to include its price once available; requests remain blocked until that revision takes effect.',
+  allocationUncoveredModelsScheduled:
+    'Supported models without prices in the saved upcoming version ({{count}}): {{models}}. Save a corrected version before it takes effect; requests to these models will remain blocked after this version takes effect.',
+  allocationUncoveredModelsTiming:
+    'If saved now, this change is expected to take effect on {{date}}.',
+  allocationUncoveredModelsScheduledTiming:
+    'This saved version is scheduled to take effect on {{date}}.',
+  allocationCatalogUnavailable:
+    'Some account model catalogs are unavailable. Saved prices are retained when available; refresh account models to update coverage.',
+  allocationCurrentPricing: 'Current price coverage',
+  allocationScheduledPricing: 'Scheduled price coverage',
   allocationStartNext: 'Start next period',
-  allocationStartNextRatio:
-    'Wait until all current account windows reach their next reset before starting',
   allocationImmediateHint:
-    'Start immediately: fixed allowances begin now; share allowances divide the remaining upstream capacity at the first fresh observation. Earlier usage is not backfilled.',
+    'Start immediately: the budget counts new requests from activation. Earlier usage is not backfilled.',
   allocationScheduled: '{{mode}} takes effect {{date}}',
   allocationLoading: 'Loading allocations…',
   allocationFailed: 'Unable to load or save allocations. Please retry.',
   allocationInvalid:
-    'Check the name, members, positive allowances and model prices. Shares must total at most 100%; percentages allow two decimal places and M / USD allow six.',
+    'Check the name, selected members, reset date/time, and window conditions. Shares must total at most 100%; percentages allow two decimal places and M / USD allow six.',
   allocationPoolConflict:
     'These accounts are reserved by a resource allowance or shared with another pool. Use a separate pool; a managed pool’s account list is fixed.',
-  allocationSnapshotRequired:
-    'Fresh Codex quota data is required. Refresh account usage and retry. Unknown or reset data is never treated as full capacity.',
   allocationSettlementConflict:
     'Usage changed or the correction conflicts with a previous settlement. Refresh before retrying.',
   allocationPending: 'Usage pending reconciliation',
+  allocationRiskLimit:
+    'Current requests reserve capacity until their usage is known. Retry after one finishes, or ask an administrator to correct pending usage.',
+  allocationRiskPaused: 'New requests temporarily paused',
+  allocationRiskExposure:
+    'This cycle: {{inFlight}} in flight · {{pending}} awaiting usage · {{reserved}} {{unit}} temporarily reserved',
+  allocationAdmissionRoom:
+    'Admission headroom: {{room}} {{unit}} (includes a temporary buffer, not added allowance).',
+  allocationOlderPending:
+    'Older pending requests: {{older}}. They do not count toward this cycle’s admission.',
   allocationExhausted: 'Allowance exhausted',
   allocationUnavailable:
     'This resource allowance is paused, scheduled, or no longer available to you.',
-  allocationUnpriced: 'Model price is not configured',
-  allocationEstimateHint:
-    'Estimated shares: 1 point = 1% of one account’s full window. Windows are tracked separately. Recent usage updates automatically. Prolonged delays pause new requests; in-flight requests may exceed the remaining allowance.',
+  allocationUnpriced:
+    'No usable model price is available for this pool. Refresh account models or restrict the pool to priced models, then retry.',
+  allocationUnknownWindowOverride:
+    'A personal limit refers to a time-window condition that no longer exists. Refresh this rule and retry.',
+  allocationRatioTokensBalanceHint:
+    'Each token limit equals its window’s total token budget × assigned percentage. This is an internal allowance; upstream quota may run out first.',
+  allocationRatioAmountBalanceHint:
+    'Each amount limit equals its window’s total internal USD budget × assigned percentage. This is not an upstream cash balance.',
   allocationNoBalances:
-    'No balances yet. For share mode, sync fresh upstream usage after the resource allowance starts.',
-  allocationPoints: 'points',
-  allocationPrimary: 'Primary window',
-  allocationSecondary: 'Secondary window',
+    'No balances yet. Usage begins with requests made after activation.',
   allocationLimit: 'Allowance',
   allocationUsed: 'Used',
   allocationRemaining: 'Remaining',
   allocationResetAt: 'Resets {{date}}',
   allocationActualTokens: '{{tokens}} M tokens',
-  allocationSync: 'Sync upstream usage',
-  allocationAwaitingSync: 'Awaiting upstream change',
   allocationCorrect: 'Correct usage',
   allocationSettle: 'Confirm settlement',
   allocationSettlementHint:
-    'Sync upstream data first. Correct only with evidence: enter total input/output/cache tokens, or the request’s total percentage points for each original window. Corrections are audited and cannot be undone here.',
+    'Correct only with evidence: enter the request’s total input, output and cached-input tokens. Corrections are audited and cannot be undone here.',
   allocationInputM: 'Input tokens · M',
   allocationOutputM: 'Output tokens · M',
   allocationCachedM: 'Cached input · M',
-  allocationUnassignedHint:
-    'Some upstream usage cannot be attributed to a member. Confirm it as external usage; it reduces upstream capacity and is not charged to any member.',
-  allocationReserve: 'Confirm external usage',
   allocationMoreMembers: 'Load more members',
   allocationMine: 'My resource allowances',
   allocationRefreshMine: 'Refresh my resource allowances',
@@ -148,9 +186,10 @@ export const en = {
   auditAllocationSave: 'Saved resource allowance',
   auditAllocationSettle: 'Settled resource allowance usage',
   auditAllocationReconcile: 'Confirmed external quota usage',
+  auditAllocationDelete: 'Deleted resource allowance',
 
-  periodDaily: 'Daily · UTC',
-  periodMonthly: 'Monthly · UTC',
+  periodDaily: 'Daily · {{zone}}',
+  periodMonthly: 'Monthly · {{zone}}',
   auditMemberBudget: 'Updated token budget',
   auditMemberBudgetSettle: 'Settled token usage',
   reasonTokenQuota:
@@ -245,6 +284,18 @@ export const en = {
   auditBackupVerify: 'Verified backup',
   systemSettings: 'System settings',
   systemSettingsDescription: 'Applies to every workspace.',
+  timeZoneTitle: 'Time zone',
+  timeZoneDescription:
+    'Controls displayed timestamps and daily/monthly resource allowance resets across this instance. Historical operational usage charts retain their UTC buckets.',
+  timeZoneLabel: 'Instance time zone',
+  timeZoneHint:
+    'Enter an IANA time zone, such as Asia/Shanghai. Changes take effect immediately.',
+  timeZonePreview: 'Current time: {{time}} ({{zone}})',
+  timeZoneInvalid: 'Enter a valid IANA time zone.',
+  timeZoneSaveFailed:
+    'Could not save the time zone. The current setting is unchanged.',
+  timeZoneSaved: 'Time zone saved.',
+  timeZoneSave: 'Save time zone',
   codexVersionTitle: 'Codex client version',
   codexVersionDescription:
     'Instance-wide settings for Codex model discovery and requests. Version checks read official release metadata; they do not install software.',
@@ -424,7 +475,7 @@ export const en = {
   activityGrid: 'Weekday and hour activity',
   activityNotCollected: 'Not collected',
   activityCoverage:
-    'Hourly totals collected since {{time}} (UTC); earlier hours are not included.',
+    'Hourly totals collected since {{time}} ({{zone}}); earlier hours are not included.',
   activityKeys:
     'Use arrow keys to move between hours and weekdays. Home and End move within a row; Control plus Home or End moves to the first or last cell.',
   activitySamples: 'Matching hourly windows: {{count}}',
@@ -495,7 +546,7 @@ export const en = {
   loadingUsageSummary: 'Loading usage summary…',
   usageSummaryFailed: 'Could not load usage summary. Please try again.',
   usageTrackingSince:
-    'Collecting since {{time}} (UTC). Earlier calls are not included.',
+    'Collecting since {{time}} ({{zone}}). Earlier calls are not included.',
   usageRequests: 'Requests',
   usageCompletionRate: 'Completion rate',
   usageAverageDuration: 'Average duration',

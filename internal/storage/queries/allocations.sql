@@ -1,6 +1,25 @@
 -- name: ListAllocationSchemes :many
 SELECT s.*,g.name AS group_name FROM allocation_schemes s
 JOIN account_groups g ON g.id=s.group_id WHERE g.tenant_id=sqlc.arg(tenant_id) ORDER BY s.id;
+
+-- name: ListAllocationPoolPolicies :many
+SELECT g.id AS group_id,g.restricted_models
+FROM allocation_schemes s JOIN account_groups g ON g.id=s.group_id
+WHERE g.tenant_id=sqlc.arg(tenant_id) ORDER BY g.id;
+
+-- name: ListAllocationPoolModels :many
+SELECT gm.group_id,gm.model FROM group_models gm
+JOIN allocation_schemes s ON s.group_id=gm.group_id
+JOIN account_groups g ON g.id=s.group_id
+WHERE g.tenant_id=sqlc.arg(tenant_id) ORDER BY gm.group_id,gm.model;
+
+-- name: ListAllocationPoolCatalogs :many
+SELECT ga.group_id,a.id,a.provider,a.models_snapshot,a.models_revision
+FROM group_accounts ga JOIN allocation_schemes s ON s.group_id=ga.group_id
+JOIN account_groups g ON g.id=s.group_id JOIN accounts a ON a.id=ga.account_id
+WHERE g.tenant_id=sqlc.arg(tenant_id) AND a.enabled=1 AND a.status!='reauth_required'
+ORDER BY ga.group_id,a.id;
+
 -- name: GetAllocationScheme :one
 SELECT s.*,g.name AS group_name FROM allocation_schemes s
 JOIN account_groups g ON g.id=s.group_id WHERE s.id=?;
@@ -46,81 +65,21 @@ UPDATE allocation_entries SET state='pending' WHERE state='active' AND EXISTS(
 SELECT 1 FROM allocation_schemes s JOIN account_groups g ON g.id=s.group_id
 WHERE s.id=allocation_entries.scheme_id AND g.tenant_id=sqlc.arg(tenant_id));
 -- name: AllocationMemberUsage :one
+-- A time-zone change reassigns existing requests by their start instant, regardless of their stored original window.
 SELECT CAST(COALESCE(sum(cost),0) AS INTEGER) AS used,CAST(COALESCE(sum(input_tokens+output_tokens),0) AS INTEGER) AS tokens
-FROM allocation_entries WHERE scheme_id=? AND user_id=? AND window_start=? AND mode=?;
+FROM allocation_entries WHERE scheme_id=sqlc.arg(scheme_id) AND user_id=sqlc.arg(user_id)
+AND started_at>=sqlc.arg(started_from) AND started_at<sqlc.arg(started_to) AND mode=sqlc.arg(mode);
 -- name: AllocationMemberPending :one
 SELECT count(*) FROM allocation_entries WHERE scheme_id=? AND user_id=? AND state='pending';
+-- name: AllocationMemberExposure :one
+SELECT CAST(COALESCE(SUM(CASE WHEN state='active' THEN 1 ELSE 0 END),0) AS INTEGER) AS active,
+CAST(COALESCE(SUM(CASE WHEN state='pending' THEN 1 ELSE 0 END),0) AS INTEGER) AS pending
+FROM allocation_entries WHERE scheme_id=sqlc.arg(scheme_id) AND user_id=sqlc.arg(user_id)
+AND started_at>=sqlc.arg(started_from) AND started_at<sqlc.arg(started_to)
+AND mode=sqlc.arg(mode) AND state IN ('active','pending');
 -- name: ListAllocationPending :many
-SELECT * FROM allocation_entries WHERE scheme_id=sqlc.arg(scheme_id) AND (sqlc.arg(user_id)=0 OR user_id=sqlc.arg(user_id)) AND (state='pending' OR state='observed') ORDER BY started_at LIMIT 256;
--- name: ListAllocationWindows :many
-SELECT * FROM allocation_windows WHERE scheme_id=? ORDER BY account_id,kind,reset_at DESC;
--- name: CurrentAccountAllocationWindows :many
-SELECT * FROM allocation_windows WHERE scheme_id=? AND account_id=? AND reset_at>? ORDER BY kind;
--- name: FindAllocationWindow :one
-SELECT * FROM allocation_windows WHERE scheme_id=? AND account_id=? AND kind=? AND reset_at=?;
--- name: CreateAllocationWindow :execlastid
-INSERT INTO allocation_windows(scheme_id,account_id,kind,reset_at,account_revision,observed_at,observed_points,baseline_points)
-VALUES(?,?,?,?,?,?,?,?);
--- name: ObserveAllocationWindow :exec
-UPDATE allocation_windows SET observed_at=?,observed_points=?,unassigned=unassigned+? WHERE id=?;
--- name: AddAllocationWindowMember :exec
-INSERT INTO allocation_window_members(window_id,user_id,allowance) VALUES(?,?,?);
--- name: AllocationWindowUsage :many
-SELECT m.user_id,m.allowance,CAST(COALESCE(sum(d.points),0) AS INTEGER) AS used
-FROM allocation_window_members m LEFT JOIN allocation_entries e ON e.user_id=m.user_id
-LEFT JOIN allocation_debits d ON d.request_id=e.request_id AND d.window_id=m.window_id
-WHERE m.window_id=sqlc.arg(window_id) AND (sqlc.arg(user_id)=0 OR m.user_id=sqlc.arg(user_id)) GROUP BY m.user_id,m.allowance ORDER BY m.user_id;
--- name: BeginAllocationDebit :exec
-INSERT INTO allocation_debits(request_id,window_id) VALUES(?,?);
--- name: ListAllocationDebits :many
-SELECT d.*,e.cost,e.state,e.finished_at,e.started_at,e.user_id FROM allocation_debits d
-JOIN allocation_entries e ON e.request_id=d.request_id WHERE window_id=? AND reconciled=0 ORDER BY e.started_at,e.request_id;
--- name: SetAllocationDebit :exec
-UPDATE allocation_debits SET points=?,reconciled=1 WHERE request_id=? AND window_id=?;
--- name: SettleReconciledAllocationEntries :exec
-UPDATE allocation_entries SET state='settled' WHERE scheme_id=? AND state='observed'
-AND NOT EXISTS(SELECT 1 FROM allocation_debits d WHERE d.request_id=allocation_entries.request_id AND d.reconciled=0);
--- name: AllocationAccountUnfinished :one
-SELECT count(*) FROM allocation_entries WHERE account_id=? AND state IN ('active','pending');
--- name: GetRequestAllocationDebits :many
-SELECT d.*,w.kind,w.reset_at,w.account_id FROM allocation_debits d JOIN allocation_windows w ON w.id=d.window_id WHERE request_id=?;
--- name: AllocationUnassigned :one
-SELECT CAST(COALESCE(sum(unassigned),0) AS INTEGER) FROM allocation_windows WHERE scheme_id=?;
--- name: ClearAllocationUnassigned :exec
-UPDATE allocation_windows SET unassigned=0 WHERE scheme_id=?;
--- name: MarkExpiredAllocationEntries :exec
-UPDATE allocation_entries SET state='pending' WHERE allocation_entries.scheme_id=sqlc.arg(scheme_id) AND state='observed'
-AND EXISTS(SELECT 1 FROM allocation_debits d JOIN allocation_windows w ON w.id=d.window_id
-WHERE d.request_id=allocation_entries.request_id AND d.reconciled=0 AND w.reset_at<=sqlc.arg(reset_at));
--- name: AllocationAccountObserved :one
-SELECT count(*) FROM allocation_entries WHERE scheme_id=? AND account_id=? AND state IN ('active','observed');
--- name: AllocationAccountAwaiting :one
-SELECT count(*) AS count, CAST(COALESCE(min(finished_at),0) AS INTEGER) AS oldest
-FROM allocation_entries WHERE scheme_id=? AND account_id=? AND state='observed';
+SELECT * FROM allocation_entries WHERE scheme_id=sqlc.arg(scheme_id) AND (sqlc.arg(user_id)=0 OR user_id=sqlc.arg(user_id)) AND state='pending' ORDER BY started_at DESC,request_id DESC LIMIT 256;
 -- name: PruneAllocations :exec
-DELETE FROM allocation_entries WHERE state='settled' AND (
- (mode<>'ratio' AND allocation_entries.reset_at<sqlc.arg(before)) OR
- (mode='ratio' AND finished_at<sqlc.arg(before)*1000 AND NOT EXISTS(
- SELECT 1 FROM allocation_debits d JOIN allocation_windows w ON w.id=d.window_id
- WHERE d.request_id=allocation_entries.request_id AND (d.reconciled=0 OR w.reset_at>=sqlc.arg(before))))
-);
--- name: PruneAllocationWindows :exec
-DELETE FROM allocation_windows WHERE reset_at<? AND unassigned=0
-AND NOT EXISTS(SELECT 1 FROM allocation_debits WHERE window_id=allocation_windows.id);
--- name: AdvanceManualAllocationWindow :exec
-UPDATE allocation_windows SET observed_points=observed_points+? WHERE id=?;
--- name: GetAllocationWindow :one
-SELECT * FROM allocation_windows WHERE id=?;
--- name: AllocationWindowTokens :one
-SELECT CAST(COALESCE(sum(e.input_tokens+e.output_tokens),0) AS INTEGER) FROM allocation_debits d
-JOIN allocation_entries e ON e.request_id=d.request_id WHERE d.window_id=? AND e.user_id=?;
--- name: AllocationMemberUnresolved :one
-SELECT count(*) FROM allocation_entries e WHERE e.scheme_id=? AND e.user_id=? AND (e.state='pending'
-OR (e.state='observed' AND EXISTS(SELECT 1 FROM allocation_debits d JOIN allocation_windows w ON w.id=d.window_id
-WHERE d.request_id=e.request_id AND d.reconciled=0 AND w.reset_at<=?)));
-
+DELETE FROM allocation_entries WHERE state='settled' AND reset_at<sqlc.arg(before);
 -- name: AccountHasAllocation :one
 SELECT EXISTS(SELECT 1 FROM group_accounts ga JOIN allocation_schemes s ON s.group_id=ga.group_id WHERE ga.account_id=?);
-
--- name: RevalidateAllocationWindow :exec
-UPDATE allocation_windows SET account_revision=? WHERE id=?;

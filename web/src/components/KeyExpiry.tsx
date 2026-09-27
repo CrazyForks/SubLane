@@ -9,6 +9,7 @@ import {
   DropdownMenuTrigger,
 } from './ui/DropdownMenu'
 import type { ExpiryChoice } from '@/lib/keys'
+import { formatInstanceDate, useTimeZone } from '@/lib/timezone'
 export function KeyExpiry({
   value,
   onChange,
@@ -21,6 +22,7 @@ export function KeyExpiry({
   disabled: boolean
 }) {
   const { t, i18n } = useTranslation()
+  const timeZone = useTimeZone()
   const label = (choice: ExpiryChoice) =>
     choice === 'keep'
       ? t('keyKeepExpiry')
@@ -65,8 +67,11 @@ export function KeyExpiry({
           {current === null
             ? t('keyNeverExpires')
             : t('keyExpiresOn', {
-                date: new Date(current! * 1000).toLocaleString(
-                  i18n.resolvedLanguage,
+                date: formatInstanceDate(
+                  current! * 1000,
+                  i18n.resolvedLanguage ?? 'en',
+                  timeZone,
+                  { dateStyle: 'short', timeStyle: 'medium' },
                 ),
               })}
         </p>

@@ -31,8 +31,10 @@ import {
   DialogTitle,
 } from '@/components/ui/Dialog'
 
+import { useTimeZone } from '@/lib/timezone'
 export function Proxies() {
   const { t, i18n } = useTranslation()
+  const timeZone = useTimeZone()
   const client = useQueryClient()
   const query = useQuery(proxyOptions)
   const heading = useRef<HTMLHeadingElement>(null)
@@ -109,6 +111,7 @@ export function Proxies() {
     type: 'region',
   })
   const dates = new Intl.DateTimeFormat(i18n.resolvedLanguage ?? 'en', {
+    timeZone,
     dateStyle: 'medium',
     timeStyle: 'short',
   })
