@@ -113,7 +113,9 @@ export const zh: Record<keyof typeof en, string> = {
     '按当前周期计算，现在保存的修改预计于 {{date}} 生效；暂停或启用访问会立即生效。',
   allocationStartEffectivePreview: '若现在保存，此规则预计于 {{date}} 开始。',
   allocationMissingPrices:
-    '{{count}} 个可用模型缺少当前目录价格（{{models}}）。有历史价格时沿用旧价，否则这些模型的请求暂时无法使用此分配。',
+    '{{count}} 个模型缺少当前目录价格（{{models}}），现正沿用规则已保存的价格。刷新价格目录后，后续规则版本可使用新价格。',
+  allocationUncoveredModels:
+    '{{count}} 个可用模型尚未进入本规则的价格快照（{{models}}）。价格可用后需重新保存规则；在新版本生效前，这些模型的请求仍会被拒绝。',
   allocationCatalogUnavailable:
     '部分账号的模型目录暂不可用。有历史价格时会保留；请刷新账号模型以更新覆盖范围。',
   allocationCurrentPricing: '当前版本的价格覆盖',

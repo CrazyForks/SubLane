@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -561,8 +562,8 @@ func TestAutomaticPricesSavePricedModelsAndWarnAboutMissingOnes(t *testing.T) {
 	if len(scheme.Config.Rates) != 1 || scheme.Config.Rates[0].Model != "synthetic-priced" {
 		t.Fatal("priced model was not saved", scheme.Config.Rates)
 	}
-	if len(scheme.Config.MissingPriceModels) != 1 || scheme.Config.MissingPriceModels[0] != "synthetic-new" {
-		t.Fatal("missing model price was not returned", scheme.Config.MissingPriceModels)
+	if len(scheme.PriceCoverage.UncoveredModels) != 1 || scheme.PriceCoverage.UncoveredModels[0] != "synthetic-new" {
+		t.Fatal("uncovered model was not returned", scheme.PriceCoverage)
 	}
 	if _, err := rateFor(scheme.Revision, "synthetic-new"); !errors.Is(err, ErrUnpriced) {
 		t.Fatal("unpriced request should remain blocked", err)
@@ -595,8 +596,8 @@ func TestAutomaticPricesReuseSavedRateWhenCatalogPriceDisappears(t *testing.T) {
 	if updated.Next == nil || len(updated.Next.Config.Rates) != 1 || updated.Next.Config.Rates[0] != scheme.Config.Rates[0] {
 		t.Fatal("saved price was not retained", updated.Next)
 	}
-	if len(updated.Next.Config.MissingPriceModels) != 1 || updated.Next.Config.MissingPriceModels[0] != "synthetic-priced" {
-		t.Fatal("missing current catalog price was not reported", updated.Next.Config.MissingPriceModels)
+	if len(updated.Next.PriceCoverage.MissingCatalogPrices) != 1 || updated.Next.PriceCoverage.MissingCatalogPrices[0] != "synthetic-priced" {
+		t.Fatal("missing current catalog price was not reported", updated.Next.PriceCoverage)
 	}
 }
 
@@ -626,8 +627,142 @@ func TestAutomaticPricesKeepSavedRateWhenAccountCatalogIsUnavailable(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if updated.Next == nil || !updated.Next.Config.CatalogUnavailable || len(updated.Next.Config.Rates) != 1 {
+	if updated.Next == nil || !updated.Next.PriceCoverage.CatalogUnavailable || len(updated.Next.Config.Rates) != 1 {
 		t.Fatal("unavailable catalog should retain usable rate and return warning", updated.Next)
+	}
+}
+
+func TestPriceCoverageRefreshesWithoutSavingAndIsNotPersisted(t *testing.T) {
+	_, conn, user, account := fixture(t)
+	ctx := context.Background()
+	if _, err := conn.Exec(`UPDATE accounts SET models_snapshot = ? WHERE id = ?`,
+		`{"models":["synthetic-priced"],"updated_at":1,"source":"synthetic"}`, account); err != nil {
+		t.Fatal(err)
+	}
+	manager := NewWithPricing(conn, pricing.NewStatic(map[string]pricing.Price{
+		"synthetic-priced": {Input: 1_000_000, Output: 2_000_000},
+	}))
+	scheme, err := manager.SaveScheme(ctx, 0, SchemeInput{Name: "Synthetic live warning", GroupID: 2, Enabled: true, Config: Config{
+		Mode: "amount", Period: "day", Members: []Share{{UserID: user, Limit: 1_000_000}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager.pricing = pricing.NewStatic(map[string]pricing.Price{})
+	listed, err := manager.Schemes(ctx)
+	if err != nil || len(listed) != 1 || len(listed[0].PriceCoverage.MissingCatalogPrices) != 1 {
+		t.Fatal("current missing price did not appear without saving", listed, err)
+	}
+	manager.pricing = pricing.NewStatic(map[string]pricing.Price{
+		"synthetic-priced": {Input: 1_000_000, Output: 2_000_000},
+	})
+	listed, err = manager.Schemes(ctx)
+	if err != nil || len(listed[0].PriceCoverage.MissingCatalogPrices) != 0 {
+		t.Fatal("resolved catalog warning did not clear without saving", listed, err)
+	}
+	var raw string
+	if err := conn.QueryRow(`SELECT config FROM allocation_revisions WHERE scheme_id = ?`, scheme.ID).Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(raw, "price_coverage") || strings.Contains(raw, "missing_price_models") || strings.Contains(raw, "catalog_unavailable") {
+		t.Fatal("transient price warning was persisted", raw)
+	}
+}
+
+func TestNewlyPricedModelStillNeedsARevision(t *testing.T) {
+	_, conn, user, account := fixture(t)
+	ctx := context.Background()
+	if _, err := conn.Exec(`UPDATE accounts SET models_snapshot = ? WHERE id = ?`,
+		`{"models":["synthetic-priced","synthetic-new"],"updated_at":1,"source":"synthetic"}`, account); err != nil {
+		t.Fatal(err)
+	}
+	manager := NewWithPricing(conn, pricing.NewStatic(map[string]pricing.Price{
+		"synthetic-priced": {Input: 1_000_000, Output: 2_000_000},
+	}))
+	input := SchemeInput{Name: "Synthetic coverage", GroupID: 2, Enabled: true, Config: Config{
+		Mode: "amount", Period: "day", Members: []Share{{UserID: user, Limit: 1_000_000}},
+	}}
+	scheme, err := manager.SaveScheme(ctx, 0, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager.pricing = pricing.NewStatic(map[string]pricing.Price{
+		"synthetic-priced": {Input: 1_000_000, Output: 2_000_000},
+		"synthetic-new":    {Input: 1_000_000, Output: 2_000_000},
+	})
+	listed, err := manager.Schemes(ctx)
+	if err != nil || len(listed) != 1 || len(listed[0].PriceCoverage.UncoveredModels) != 1 || len(listed[0].PriceCoverage.MissingCatalogPrices) != 0 {
+		t.Fatal("saved revision should still warn about its missing rate", listed, err)
+	}
+	input.Name = "Synthetic updated coverage"
+	updated, err := manager.SaveScheme(ctx, scheme.ID, input)
+	if err != nil || updated.Next == nil || len(updated.Next.PriceCoverage.UncoveredModels) != 0 {
+		t.Fatal("new revision should cover newly priced model", updated.Next, err)
+	}
+}
+
+func TestMissingCatalogPricePrefersScheduledRateOverCurrentRate(t *testing.T) {
+	_, conn, user, account := fixture(t)
+	ctx := context.Background()
+	if _, err := conn.Exec(`UPDATE accounts SET models_snapshot = ? WHERE id = ?`,
+		`{"models":["synthetic-priced"],"updated_at":1,"source":"synthetic"}`, account); err != nil {
+		t.Fatal(err)
+	}
+	manager := NewWithPricing(conn, pricing.NewStatic(map[string]pricing.Price{
+		"synthetic-priced": {Input: 1_000_000, Output: 2_000_000},
+	}))
+	input := SchemeInput{Name: "Synthetic first", GroupID: 2, Enabled: true, Config: Config{
+		Mode: "amount", Period: "day", Members: []Share{{UserID: user, Limit: 1_000_000}},
+	}}
+	scheme, err := manager.SaveScheme(ctx, 0, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager.pricing = pricing.NewStatic(map[string]pricing.Price{
+		"synthetic-priced": {Input: 3_000_000, Output: 4_000_000},
+	})
+	input.Name = "Synthetic second"
+	updated, err := manager.SaveScheme(ctx, scheme.ID, input)
+	if err != nil || updated.Next == nil || updated.Next.Config.Rates[0].Input != 3_000_000 {
+		t.Fatal("new catalog price was not scheduled", updated.Next, err)
+	}
+	manager.pricing = pricing.NewStatic(map[string]pricing.Price{})
+	input.Name = "Synthetic third"
+	updated, err = manager.SaveScheme(ctx, scheme.ID, input)
+	if err != nil || updated.Next == nil || updated.Next.Config.Rates[0].Input != 3_000_000 {
+		t.Fatal("older active price replaced newer scheduled price", updated.Next, err)
+	}
+}
+
+func TestNilPricingServiceAcceptsSubmittedRates(t *testing.T) {
+	manager, _, user, _ := fixture(t)
+	scheme, err := manager.SaveScheme(context.Background(), 0, SchemeInput{Name: "Synthetic direct prices", GroupID: 2, Enabled: true, Config: Config{
+		Mode: "amount", Period: "day", Members: []Share{{UserID: user, Limit: 1_000_000}},
+		Rates: []Rate{{Model: "synthetic", Input: 1_000_000, Output: 2_000_000}},
+	}})
+	if err != nil || len(scheme.Config.Rates) != 1 {
+		t.Fatal("nil pricing should retain supplied test-seam rate", scheme, err)
+	}
+}
+
+func TestEditBoundaryUsesCurrentDurationWhenDraftIsLonger(t *testing.T) {
+	manager, _, user, _ := fixture(t)
+	ctx := context.Background()
+	anchor := time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC).Unix()
+	manager.now = func() time.Time { return unix(anchor) }
+	input := SchemeInput{Name: "Synthetic short window", GroupID: 2, Enabled: true, Config: Config{
+		Mode: "windows", Period: "durations", Windows: []WindowCondition{{DurationSeconds: 5 * 3600, Limit: 1_000_000}},
+		Members: []Share{{UserID: user}}, Rates: []Rate{{Model: "synthetic", Input: 1_000_000, Output: 2_000_000}},
+	}}
+	scheme, err := manager.SaveScheme(ctx, 0, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager.now = func() time.Time { return unix(anchor + 3600) }
+	input.Config.Windows = []WindowCondition{{DurationSeconds: 30 * 86400, Limit: 1_000_000}}
+	updated, err := manager.SaveScheme(ctx, scheme.ID, input)
+	if err != nil || updated.Next == nil || updated.Next.EffectiveAt != anchor+5*3600 {
+		t.Fatal("draft duration incorrectly delayed this edit", updated.Next, err)
 	}
 }
 

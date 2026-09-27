@@ -34,13 +34,20 @@ const configSchema = z.object({
     )
     .max(100),
   rates: z.array(rateSchema).max(4096),
-  missing_price_models: z.array(z.string()).max(4096).optional(),
-  catalog_unavailable: z.boolean().optional(),
   ratio_unit: unitSchema.optional(),
   windows: z.array(windowConditionSchema).max(8).optional(),
   total: integer.optional(),
 })
-const revisionSchema = z.object({ effective_at: integer, config: configSchema })
+const priceCoverageSchema = z.object({
+  missing_catalog_prices: z.array(z.string()).max(4096).optional(),
+  uncovered_models: z.array(z.string()).max(4096).optional(),
+  catalog_unavailable: z.boolean().optional(),
+})
+const revisionSchema = z.object({
+  effective_at: integer,
+  config: configSchema,
+  price_coverage: priceCoverageSchema.optional(),
+})
 export const schemeSchema = revisionSchema.extend({
   id: integer,
   name: z.string(),
@@ -88,6 +95,7 @@ export type AllocationDetail = z.infer<typeof allocationDetailSchema>
 export type AllocationPending = z.infer<typeof pendingSchema>
 export type AllocationMode = z.infer<typeof modeSchema>
 export type AllocationConfig = z.infer<typeof configSchema>
+export type PriceCoverage = z.infer<typeof priceCoverageSchema>
 export type SchemeInput = {
   name: string
   group_id: number

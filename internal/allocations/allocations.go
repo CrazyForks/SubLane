@@ -61,18 +61,23 @@ type Rate struct {
 	Output int64  `json:"output"`
 }
 type Config struct {
-	Mode               string            `json:"mode"`
-	Period             string            `json:"period"`
-	ResetTime          string            `json:"reset_time,omitempty"`
-	ResetDay           int               `json:"reset_day,omitempty"`
-	Members            []Share           `json:"members"`
-	Rates              []Rate            `json:"rates"`
-	RatioUnit          string            `json:"ratio_unit,omitempty"`
-	Windows            []WindowCondition `json:"windows,omitempty"`
-	MissingPriceModels []string          `json:"missing_price_models,omitempty"`
-	CatalogUnavailable bool              `json:"catalog_unavailable,omitempty"`
+	Mode      string            `json:"mode"`
+	Period    string            `json:"period"`
+	ResetTime string            `json:"reset_time,omitempty"`
+	ResetDay  int               `json:"reset_day,omitempty"`
+	Members   []Share           `json:"members"`
+	Rates     []Rate            `json:"rates"`
+	RatioUnit string            `json:"ratio_unit,omitempty"`
+	Windows   []WindowCondition `json:"windows,omitempty"`
 	// Total is in tokens or micro-USD according to RatioUnit.
 	Total int64 `json:"total,omitempty"`
+}
+
+// PriceCoverage is derived on reads because catalogs and prices change independently of rule revisions.
+type PriceCoverage struct {
+	MissingCatalogPrices []string `json:"missing_catalog_prices,omitempty"`
+	UncoveredModels      []string `json:"uncovered_models,omitempty"`
+	CatalogUnavailable   bool     `json:"catalog_unavailable,omitempty"`
 }
 type SchemeInput struct {
 	Name      string `json:"name"`
@@ -82,9 +87,10 @@ type SchemeInput struct {
 	Config    Config `json:"config"`
 }
 type Revision struct {
-	ID          int64  `json:"id"`
-	EffectiveAt int64  `json:"effective_at"`
-	Config      Config `json:"config"`
+	ID            int64         `json:"id"`
+	EffectiveAt   int64         `json:"effective_at"`
+	Config        Config        `json:"config"`
+	PriceCoverage PriceCoverage `json:"price_coverage"`
 }
 type Scheme struct {
 	ID              int64  `json:"id"`
@@ -261,7 +267,7 @@ func (s *Service) Schemes(ctx context.Context) ([]Scheme, error) {
 	}
 	out := make([]Scheme, 0, len(rows))
 	for _, r := range rows {
-		v, err := readScheme(ctx, q, s.tenantID, r.ID, s.now().Unix(), s.location())
+		v, err := s.readScheme(ctx, q, r.ID, s.now().Unix())
 		if err != nil {
 			return nil, err
 		}
@@ -269,8 +275,8 @@ func (s *Service) Schemes(ctx context.Context) ([]Scheme, error) {
 	}
 	return out, nil
 }
-func readScheme(ctx context.Context, q *db.Queries, tenantID, id, now int64, location *time.Location) (Scheme, error) {
-	r, err := q.GetTenantAllocationScheme(ctx, db.GetTenantAllocationSchemeParams{ID: id, TenantID: tenantID})
+func (s *Service) readScheme(ctx context.Context, q *db.Queries, id, now int64) (Scheme, error) {
+	r, err := q.GetTenantAllocationScheme(ctx, db.GetTenantAllocationSchemeParams{ID: id, TenantID: s.tenantID})
 	if err != nil {
 		return Scheme{}, ErrNotFound
 	}
@@ -280,7 +286,7 @@ func readScheme(ctx context.Context, q *db.Queries, tenantID, id, now int64, loc
 		return out, err
 	}
 	if err == nil {
-		out.EditEffectiveAt = nextEffective(out.Config, now, location, out.EffectiveAt)
+		out.EditEffectiveAt = nextEffective(out.Config, now, s.location(), out.EffectiveAt)
 	}
 	next, e := q.NextAllocationRevision(ctx, db.NextAllocationRevisionParams{SchemeID: id, EffectiveAt: now})
 	if e == nil {
@@ -295,6 +301,16 @@ func readScheme(ctx context.Context, q *db.Queries, tenantID, id, now int64, loc
 		}
 	} else if !errors.Is(e, sql.ErrNoRows) {
 		return out, e
+	}
+	if s.pricing != nil && (pricedConfig(out.Config) || out.Next != nil && pricedConfig(out.Next.Config)) {
+		catalog, err := loadPoolModelCatalog(ctx, q, out.GroupID)
+		if err != nil {
+			return out, err
+		}
+		out.PriceCoverage = s.priceCoverage(catalog, out.Revision)
+		if out.Next != nil {
+			out.Next.PriceCoverage = s.priceCoverage(catalog, *out.Next)
+		}
 	}
 	return out, nil
 }
@@ -347,7 +363,7 @@ func (s *Service) SaveScheme(ctx context.Context, id int64, in SchemeInput) (Sch
 	}
 	var previousRates []Rate
 	if id != 0 {
-		previous, err := readScheme(ctx, q, s.tenantID, id, now, s.location())
+		previous, err := s.readScheme(ctx, q, id, now)
 		if err != nil {
 			return Scheme{}, err
 		}
@@ -356,6 +372,7 @@ func (s *Service) SaveScheme(ctx context.Context, id int64, in SchemeInput) (Sch
 		}
 		previousRates = append(previousRates, previous.Config.Rates...)
 		if previous.Next != nil {
+			// The scheduled revision is newer; its rates must win in the fallback map.
 			previousRates = append(previousRates, previous.Next.Config.Rates...)
 		}
 	}
@@ -416,23 +433,89 @@ func (s *Service) SaveScheme(ctx context.Context, id int64, in SchemeInput) (Sch
 	if err = audit.Record(ctx, q, "allocation.save", "allocation", audit.ID(id)); err != nil {
 		return Scheme{}, err
 	}
-	out, err := readScheme(ctx, q, s.tenantID, id, now, s.location())
+	out, err := s.readScheme(ctx, q, id, now)
 	if err != nil {
 		return Scheme{}, err
 	}
 	return out, tx.Commit()
 }
 
+type poolModelCatalog struct {
+	policy      groups.ModelPolicy
+	models      []string
+	unavailable bool
+}
+
+func pricedConfig(config Config) bool {
+	return config.Mode == "amount" || config.Mode == "windows" || config.Mode == "ratio" && config.RatioUnit == "amount"
+}
+
+// Save and read paths use the same pool model set; warning state itself is never saved in a revision.
+func loadPoolModelCatalog(ctx context.Context, q *db.Queries, groupID int64) (poolModelCatalog, error) {
+	group, err := q.GetGroup(ctx, groupID)
+	if err != nil {
+		return poolModelCatalog{}, err
+	}
+	allowed, err := q.ListGroupModels(ctx, groupID)
+	if err != nil {
+		return poolModelCatalog{}, err
+	}
+	catalog := poolModelCatalog{policy: groups.ModelPolicy{Restricted: group.RestrictedModels, Models: allowed}}
+	rows, err := q.ListGroupCatalogs(ctx, groupID)
+	if err != nil {
+		return poolModelCatalog{}, err
+	}
+	models := map[string]bool{}
+	for _, row := range rows {
+		accountCatalog, err := accounts.DecodeCatalog(row.ModelsSnapshot, row.ModelsRevision)
+		if err != nil || accountCatalog.UpdatedAt == 0 {
+			catalog.unavailable = true
+			continue
+		}
+		for _, model := range accountCatalog.Models {
+			_, native := groups.SplitModel(model)
+			// The policy needs the account provider to enforce provider-scoped allowlists.
+			if catalog.policy.Allows(row.Provider + "/" + native) {
+				models[native] = true
+			}
+		}
+	}
+	catalog.models = make([]string, 0, len(models))
+	for model := range models {
+		catalog.models = append(catalog.models, model)
+	}
+	sort.Strings(catalog.models)
+	return catalog, nil
+}
+
+func (s *Service) priceCoverage(catalog poolModelCatalog, revision Revision) PriceCoverage {
+	if !pricedConfig(revision.Config) {
+		return PriceCoverage{}
+	}
+	coverage := PriceCoverage{CatalogUnavailable: catalog.unavailable}
+	saved := make(map[string]bool, len(revision.Config.Rates))
+	for _, rate := range revision.Config.Rates {
+		saved[rate.Model] = true
+	}
+	for _, model := range catalog.models {
+		if !saved[model] {
+			coverage.UncoveredModels = append(coverage.UncoveredModels, model)
+		} else if _, ok := s.pricing.Lookup(model); !ok {
+			coverage.MissingCatalogPrices = append(coverage.MissingCatalogPrices, model)
+		}
+	}
+	return coverage
+}
+
 // Priced revisions use the current catalog, then their previous saved rates when a price disappears.
 // Client-supplied rates never override catalog or previously saved prices in production.
 func (s *Service) applyPrices(ctx context.Context, q *db.Queries, groupID int64, config *Config, previous []Rate) error {
-	config.MissingPriceModels = nil
-	config.CatalogUnavailable = false
 	if config.Mode == "tokens" || config.Mode == "ratio" && config.RatioUnit == "tokens" {
 		config.Rates = []Rate{}
 		return nil
 	}
 	if s.pricing == nil {
+		// Production injects a pricing service; explicit rates remain available to test and embedded callers.
 		if len(config.Rates) == 0 {
 			config.Rates = append([]Rate(nil), previous...)
 		}
@@ -441,16 +524,7 @@ func (s *Service) applyPrices(ctx context.Context, q *db.Queries, groupID int64,
 		}
 		return ErrUnpriced
 	}
-	group, err := q.GetGroup(ctx, groupID)
-	if err != nil {
-		return err
-	}
-	allowed, err := q.ListGroupModels(ctx, groupID)
-	if err != nil {
-		return err
-	}
-	policy := groups.ModelPolicy{Restricted: group.RestrictedModels, Models: allowed}
-	rows, err := q.ListGroupCatalogs(ctx, groupID)
+	catalog, err := loadPoolModelCatalog(ctx, q, groupID)
 	if err != nil {
 		return err
 	}
@@ -458,25 +532,14 @@ func (s *Service) applyPrices(ctx context.Context, q *db.Queries, groupID int64,
 	for _, rate := range previous {
 		previousByModel[rate.Model] = rate
 	}
-	models := map[string]bool{}
-	for _, row := range rows {
-		catalog, err := accounts.DecodeCatalog(row.ModelsSnapshot, row.ModelsRevision)
-		if err != nil || catalog.UpdatedAt == 0 {
-			config.CatalogUnavailable = true
-			continue
-		}
-		for _, model := range catalog.Models {
-			_, native := groups.SplitModel(model)
-			// The policy needs the account provider to enforce provider-scoped allowlists.
-			if policy.Allows(row.Provider + "/" + native) {
-				models[native] = true
-			}
-		}
+	models := make(map[string]bool, len(catalog.models))
+	for _, model := range catalog.models {
+		models[model] = true
 	}
 	// If a catalog is temporarily unknown, retain existing prices while its models cannot be rediscovered.
-	if config.CatalogUnavailable {
+	if catalog.unavailable {
 		for model := range previousByModel {
-			if policy.Allows(model) {
+			if catalog.policy.Allows(model) {
 				models[model] = true
 			}
 		}
@@ -492,7 +555,6 @@ func (s *Service) applyPrices(ctx context.Context, q *db.Queries, groupID int64,
 			config.Rates = append(config.Rates, Rate{Model: model, Input: price.Input, Cached: price.Cached, Output: price.Output})
 			continue
 		}
-		config.MissingPriceModels = append(config.MissingPriceModels, model)
 		if rate, ok := previousByModel[model]; ok {
 			config.Rates = append(config.Rates, rate)
 		}

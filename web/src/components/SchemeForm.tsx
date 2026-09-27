@@ -718,7 +718,11 @@ export function SchemeForm({
               {t('allocationAutoPricingHint')}
             </p>
           )}
-          {initial && <AllocationPriceWarning config={initial} />}
+          {scheme && (
+            <AllocationPriceWarning
+              coverage={scheme.next?.price_coverage ?? scheme.price_coverage}
+            />
+          )}
         </section>
         <section className="space-y-4 border-t border-border pt-7">
           <div className="flex flex-wrap items-center justify-between gap-3">

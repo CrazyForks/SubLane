@@ -247,13 +247,13 @@ export function Allocations() {
                 )}
                 {s.effective_at <= query.dataUpdatedAt / 1000 && (
                   <AllocationPriceWarning
-                    config={s.config}
+                    coverage={s.price_coverage}
                     label={s.next ? t('allocationCurrentPricing') : undefined}
                   />
                 )}
                 {s.next && (
                   <AllocationPriceWarning
-                    config={s.next.config}
+                    coverage={s.next.price_coverage}
                     label={t('allocationScheduledPricing')}
                   />
                 )}

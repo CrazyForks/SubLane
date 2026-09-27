@@ -51,7 +51,7 @@ func (s *Service) Detail(ctx context.Context, id, user int64) (Detail, error) {
 	defer tx.Rollback()
 	q := db.New(tx)
 	now := s.now().Unix()
-	scheme, err := readScheme(ctx, q, s.tenantID, id, now, s.location())
+	scheme, err := s.readScheme(ctx, q, id, now)
 	if err != nil {
 		return Detail{}, err
 	}

@@ -118,7 +118,9 @@ export const en = {
   allocationStartEffectivePreview:
     'If saved now, this rule is expected to start on {{date}}.',
   allocationMissingPrices:
-    'Supported models without current catalog prices ({{count}}): {{models}}. Saved prices are reused when available; other requests to these models remain blocked.',
+    'Saved model prices are in use because current catalog prices are missing ({{count}}): {{models}}. Refresh the price catalog to update future revisions.',
+  allocationUncoveredModels:
+    'Supported models absent from this rule’s saved prices ({{count}}): {{models}}. Save the allowance to include its price once available; requests remain blocked until that revision takes effect.',
   allocationCatalogUnavailable:
     'Some account model catalogs are unavailable. Saved prices are retained when available; refresh account models to update coverage.',
   allocationCurrentPricing: 'Current price coverage',

@@ -210,27 +210,21 @@ it('shows the future edit delay while configuring a time window', () => {
   expect(screen.getByText(/Future edits may wait up to 30 days/)).toBeTruthy()
 })
 
-it('explains missing catalog prices while retaining usable model prices', () => {
+it('distinguishes a missing catalog price from a model absent in the saved revision', () => {
   render(
     <AllocationPriceWarning
-      config={{
-        mode: 'amount',
-        period: 'day',
-        members: [{ user_id: 7, limit: 1_000_000 }],
-        rates: [
-          {
-            model: 'synthetic-priced',
-            input: 1_000_000,
-            cached: 0,
-            output: 2_000_000,
-          },
-        ],
-        missing_price_models: ['synthetic-new'],
+      coverage={{
+        missing_catalog_prices: ['synthetic-old'],
+        uncovered_models: ['synthetic-new'],
         catalog_unavailable: true,
       }}
     />,
   )
+  expect(screen.getByText(/synthetic-old/)).toBeTruthy()
   expect(screen.getByText(/synthetic-new/)).toBeTruthy()
+  expect(
+    screen.getByText(/Save the allowance to include its price/),
+  ).toBeTruthy()
   expect(screen.getByText(/Saved prices are retained/)).toBeTruthy()
 })
 
