@@ -34,3 +34,7 @@ No contribution agreement or public support process is configured yet. Contribut
 ## Documentation changes
 
 Usage, operations, and architecture guides are maintained in [sublane-website](https://github.com/murongg/sublane-website), under `content/docs/` and `content/zh/`. Update those guides with application behavior changes instead of adding duplicate copies here. Repository policies, the changelog, and references not yet covered by the website stay in this repository. See [the documentation index](docs/README.md).
+
+## Publishing a version
+
+After `make publish TAG=v...` succeeds, wait for the Release workflow and verify the published assets. The workflow generates GitHub Release notes but does not update `CHANGELOG.md`. With `git-cliff 2.14.2`, run `make changelog-check` and `make changelog`, review the new version section and comparison link, then commit the updated changelog and merge it into `main`. The release is not finished until the repository changelog is updated.
