@@ -302,7 +302,7 @@ func (s *Service) readScheme(ctx context.Context, q *db.Queries, id, now int64) 
 	} else if !errors.Is(e, sql.ErrNoRows) {
 		return out, e
 	}
-	if s.pricing != nil && (pricedConfig(out.Config) || out.Next != nil && pricedConfig(out.Next.Config)) {
+	if s.pricing != nil && (pricedConfig(out.Config) || (out.Next != nil && pricedConfig(out.Next.Config))) {
 		catalog, err := loadPoolModelCatalog(ctx, q, out.GroupID)
 		if err != nil {
 			return out, err
@@ -510,7 +510,7 @@ func (s *Service) priceCoverage(catalog poolModelCatalog, revision Revision) Pri
 // Priced revisions use the current catalog, then their previous saved rates when a price disappears.
 // Client-supplied rates never override catalog or previously saved prices in production.
 func (s *Service) applyPrices(ctx context.Context, q *db.Queries, groupID int64, config *Config, previous []Rate) error {
-	if config.Mode == "tokens" || config.Mode == "ratio" && config.RatioUnit == "tokens" {
+	if !pricedConfig(*config) {
 		config.Rates = []Rate{}
 		return nil
 	}

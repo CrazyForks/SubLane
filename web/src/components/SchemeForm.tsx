@@ -721,6 +721,7 @@ export function SchemeForm({
           {scheme && (
             <AllocationPriceWarning
               coverage={scheme.next?.price_coverage ?? scheme.price_coverage}
+              effectiveAt={scheme.edit_effective_at}
             />
           )}
         </section>

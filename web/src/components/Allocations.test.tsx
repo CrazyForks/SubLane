@@ -128,6 +128,7 @@ it('shows the server-calculated effective date before editing a long window', ()
         created_at: 1,
         effective_at: 1,
         edit_effective_at: 1_896_048_000,
+        price_coverage: { uncovered_models: ['synthetic-new'] },
         next: null,
         config: {
           mode: 'windows',
@@ -146,6 +147,7 @@ it('shows the server-calculated effective date before editing a long window', ()
     /changes saved now are expected to take effect on/,
   )
   expect(preview.textContent).toContain('2030')
+  expect(screen.getByText(/synthetic-new/).textContent).toContain('2030')
 })
 
 it('updates the scheduled-start preview as the longest new window changes', () => {
@@ -213,6 +215,7 @@ it('shows the future edit delay while configuring a time window', () => {
 it('distinguishes a missing catalog price from a model absent in the saved revision', () => {
   render(
     <AllocationPriceWarning
+      effectiveAt={1_893_456_000}
       coverage={{
         missing_catalog_prices: ['synthetic-old'],
         uncovered_models: ['synthetic-new'],
@@ -225,6 +228,10 @@ it('distinguishes a missing catalog price from a model absent in the saved revis
   expect(
     screen.getByText(/Save the allowance to include its price/),
   ).toBeTruthy()
+  expect(
+    screen.getByText(/If saved now, this change is expected to take effect/)
+      .textContent,
+  ).toContain('2030')
   expect(screen.getByText(/Saved prices are retained/)).toBeTruthy()
 })
 

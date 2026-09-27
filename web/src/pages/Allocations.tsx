@@ -249,12 +249,14 @@ export function Allocations() {
                   <AllocationPriceWarning
                     coverage={s.price_coverage}
                     label={s.next ? t('allocationCurrentPricing') : undefined}
+                    effectiveAt={s.edit_effective_at}
                   />
                 )}
                 {s.next && (
                   <AllocationPriceWarning
                     coverage={s.next.price_coverage}
                     label={t('allocationScheduledPricing')}
+                    effectiveAt={s.edit_effective_at}
                   />
                 )}
               </div>
