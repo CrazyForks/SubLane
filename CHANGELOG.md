@@ -2,6 +2,15 @@
 
 All notable changes are documented here in [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
+## [0.1.0-rc.9] - 2026-09-27
+
+### Added
+
+- Guide Docker and binary deployments
+
+### Fixed
+
+- Harden hosted cleanup, limits, and price integrity
 ## [0.1.0-rc.8] - 2026-09-27
 
 ### Added
@@ -111,6 +120,7 @@ All notable changes are documented here in [Keep a Changelog](https://keepachang
 - Distinguish remaining quota with status colors
 - Restore version-gated model discovery
 
+[0.1.0-rc.9]: https://github.com/murongg/SubLane/compare/v0.1.0-rc.8...v0.1.0-rc.9
 [0.1.0-rc.8]: https://github.com/murongg/SubLane/compare/v0.1.0-rc.7...v0.1.0-rc.8
 [0.1.0-rc.7]: https://github.com/murongg/SubLane/compare/v0.1.0-rc.6...v0.1.0-rc.7
 [0.1.0-rc.6]: https://github.com/murongg/SubLane/compare/v0.1.0-rc.5...v0.1.0-rc.6
