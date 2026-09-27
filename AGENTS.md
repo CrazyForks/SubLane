@@ -16,6 +16,11 @@ Usage, operations, and architecture guides are maintained in [the documentation 
 - Product plans and specifications in `docs/plans/` and `docs/specs/` are local working files; do not commit them unless explicitly requested.
 - Do not create commits, publish a repository, or deploy without a user request.
 
+## Releases
+
+- Publishing a version is not complete until `CHANGELOG.md` includes that tag. The tag workflow generates GitHub Release notes but does not update the repository file.
+- After the release workflow succeeds, use `git-cliff 2.14.2` to run `make changelog-check` and `make changelog`. Review the new version section and comparison link, then commit the changelog and merge it into `main`.
+
 ## Boundaries
 
 - `cmd/sublane` owns startup, process lifecycle, and dependency wiring.

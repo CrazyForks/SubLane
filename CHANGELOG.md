@@ -2,7 +2,16 @@
 
 All notable changes are documented here in [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
-## [Unreleased]
+## [0.1.0-rc.8] - 2026-09-27
+
+### Added
+
+- Add configurable windows and pool pricing
+
+### Changed
+
+- **BREAKING:** Use explicit budgets and local reset schedules — Legacy upstream percentage allocation schemes are unsupported and must be removed and recreated.
+## [0.1.0-rc.7] - 2026-09-25
 
 ### Changed
 
@@ -102,7 +111,8 @@ All notable changes are documented here in [Keep a Changelog](https://keepachang
 - Distinguish remaining quota with status colors
 - Restore version-gated model discovery
 
-[Unreleased]: https://github.com/murongg/SubLane/compare/v0.1.0-rc.6...HEAD
+[0.1.0-rc.8]: https://github.com/murongg/SubLane/compare/v0.1.0-rc.7...v0.1.0-rc.8
+[0.1.0-rc.7]: https://github.com/murongg/SubLane/compare/v0.1.0-rc.6...v0.1.0-rc.7
 [0.1.0-rc.6]: https://github.com/murongg/SubLane/compare/v0.1.0-rc.5...v0.1.0-rc.6
 [0.1.0-rc.5]: https://github.com/murongg/SubLane/compare/v0.1.0-rc.4...v0.1.0-rc.5
 [0.1.0-rc.4]: https://github.com/murongg/SubLane/compare/v0.1.0-rc.3...v0.1.0-rc.4
