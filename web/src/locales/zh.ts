@@ -9,6 +9,7 @@ export const zh: Record<keyof typeof en, string> = {
   workspaceName: '工作空间名称',
   workspaceNameInvalid: '请输入不超过 64 个字符的工作空间名称。',
   workspaceCreateFailed: '无法创建工作空间，请重试。',
+  workspaceLimitReached: '每位用户最多可拥有 10 个工作空间。',
   workspaceListFailed: '无法加载工作空间。',
   workspaceSave: '保存工作空间',
   allocationPause: '暂停用量分配',

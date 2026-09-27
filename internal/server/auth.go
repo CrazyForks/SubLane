@@ -7,6 +7,7 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"net/netip"
 	"strconv"
 	"strings"
 	"time"
@@ -21,13 +22,15 @@ import (
 const sessionCookie = "sublane_session"
 
 type authHTTP struct {
-	audit     *audit.Service
-	service   *auth.Service
-	tenants   *tenants.Service
-	timeZone  *timezone.Service
-	tenantID  int64
-	publicURL string
-	limiter   *loginLimiter
+	audit             *audit.Service
+	service           *auth.Service
+	tenants           *tenants.Service
+	timeZone          *timezone.Service
+	tenantID          int64
+	publicURL         string
+	limiter           *LoginLimiter
+	enrollmentLimiter *LoginLimiter
+	trustedProxies    []netip.Prefix
 }
 
 type credentials struct {
@@ -47,9 +50,9 @@ func (h *authHTTP) register(router chi.Router) {
 	router.Group(func(public chi.Router) {
 		public.Use(h.requireAvailable)
 		public.Get("/state", h.state)
-		public.With(h.requireOrigin, h.throttleLogin).Post("/setup", func(w http.ResponseWriter, r *http.Request) { h.authenticate(w, r, true) })
+		public.With(h.requireOrigin, h.throttleEnrollment).Post("/setup", func(w http.ResponseWriter, r *http.Request) { h.authenticate(w, r, true) })
 		public.With(h.requireOrigin, h.throttleLogin).Post("/login", func(w http.ResponseWriter, r *http.Request) { h.authenticate(w, r, false) })
-		public.With(h.requireOrigin, h.throttleLogin).Post("/register", h.registerInvitation)
+		public.With(h.requireOrigin, h.throttleEnrollment).Post("/register", h.registerInvitation)
 		public.With(h.requireOrigin).Post("/logout", h.logout)
 	})
 }
@@ -71,8 +74,16 @@ func (h *authHTTP) requireOrigin(next http.Handler) http.Handler {
 }
 
 func (h *authHTTP) throttleLogin(next http.Handler) http.Handler {
+	return h.throttle(h.limiter, next)
+}
+
+func (h *authHTTP) throttleEnrollment(next http.Handler) http.Handler {
+	return h.throttle(h.enrollmentLimiter, next)
+}
+
+func (h *authHTTP) throttle(limiter *LoginLimiter, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if retry := h.limiter.allow(peerAddress(r.RemoteAddr)); retry > 0 {
+		if retry := limiter.allow(peerAddress(r, h.trustedProxies)); retry > 0 {
 			w.Header().Set("Retry-After", strconv.Itoa(retry))
 			writeJSON(w, 429, map[string]string{"error": "rate_limited"})
 			return
@@ -311,13 +322,18 @@ func requireAdminRole(next http.Handler) http.Handler {
 func requirePlatformAdmin(tenantID int64) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if tenantID != 1 || sessionUser(r).ID != 1 {
+			if !platformOwner(tenantID, sessionUser(r)) {
 				writeJSON(w, 403, map[string]string{"error": "forbidden"})
 				return
 			}
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+func platformOwner(tenantID int64, user auth.User) bool {
+	// Setup creates workspace one and the users table constrains ID one to the enabled admin role.
+	return tenantID == 1 && user.ID == 1 && user.Role == auth.RoleAdmin
 }
 
 func (h *authHTTP) requireUser(next http.Handler) http.Handler {

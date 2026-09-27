@@ -173,13 +173,21 @@ func (q *Queries) ListRequests(ctx context.Context, arg ListRequestsParams) ([]L
 	return items, nil
 }
 
-const pruneRequests = `-- name: PruneRequests :exec
-DELETE FROM request_records WHERE request_records.started_at<?1 OR request_records.id<=(SELECT r.id FROM request_records r ORDER BY r.id DESC LIMIT 1 OFFSET 5000)
+const pruneRequests = `-- name: PruneRequests :execrows
+DELETE FROM request_records WHERE id IN (
+ SELECT r.id FROM request_records r
+ WHERE r.started_at<?1
+ OR r.id<=(SELECT newest.id FROM request_records newest ORDER BY newest.id DESC LIMIT 1 OFFSET 5000)
+ LIMIT 500
+)
 `
 
-func (q *Queries) PruneRequests(ctx context.Context, beforeTime int64) error {
-	_, err := q.db.ExecContext(ctx, pruneRequests, beforeTime)
-	return err
+func (q *Queries) PruneRequests(ctx context.Context, beforeTime int64) (int64, error) {
+	result, err := q.db.ExecContext(ctx, pruneRequests, beforeTime)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const recordRequest = `-- name: RecordRequest :exec

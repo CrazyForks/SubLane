@@ -25,7 +25,8 @@ func TestParseLiteLLMPriceAndModelAliases(t *testing.T) {
 
 func TestRefreshUsesHashAndKeepsCacheOnFailure(t *testing.T) {
 	var jsonCalls atomic.Int32
-	var hash = "old"
+	document := []byte(`{"gpt-5.1-codex":{"input_cost_per_token":0.000001,"output_cost_per_token":0.000002}}`)
+	var hash = hashDocument(document)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/hash" {
 			_, _ = fmt.Fprintln(w, hash)
@@ -36,7 +37,7 @@ func TestRefreshUsesHashAndKeepsCacheOnFailure(t *testing.T) {
 			w.WriteHeader(http.StatusBadGateway)
 			return
 		}
-		_, _ = fmt.Fprintln(w, `{"gpt-5.1-codex":{"input_cost_per_token":0.000001,"output_cost_per_token":0.000002}}`)
+		_, _ = w.Write(document)
 	}))
 	defer server.Close()
 
@@ -63,6 +64,99 @@ func TestRefreshUsesHashAndKeepsCacheOnFailure(t *testing.T) {
 	}
 	if got, ok := s.Lookup("gpt-5.1-codex"); !ok || got.Input != 1000000 {
 		t.Fatalf("cache was discarded: %+v, %v", got, ok)
+	}
+}
+
+func TestRefreshRejectsMismatchedDocumentHash(t *testing.T) {
+	document := []byte(`{"synthetic-model":{"input_cost_per_token":0.000001,"output_cost_per_token":0.000002}}`)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/hash" {
+			_, _ = fmt.Fprintln(w, hashDocument([]byte("different document")))
+			return
+		}
+		_, _ = w.Write(document)
+	}))
+	defer server.Close()
+	s, err := New(Config{URL: server.URL, HashURL: server.URL + "/hash"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Refresh(context.Background()); err == nil {
+		t.Fatal("accepted a document that did not match its SHA-256")
+	}
+	if _, ok := s.Lookup("synthetic-model"); ok {
+		t.Fatal("published mismatched prices")
+	}
+}
+
+func TestCustomPriceURLWithoutHashURL(t *testing.T) {
+	document := []byte(`{"synthetic-model":{"input_cost_per_token":0.000001,"output_cost_per_token":0.000002}}`)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(document)
+	}))
+	defer server.Close()
+	s, err := New(Config{URL: server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Refresh(context.Background()); err != nil {
+		t.Fatalf("custom document without matching hash URL: %v", err)
+	}
+}
+
+func TestMismatchedCachedDocumentDoesNotSkipRefresh(t *testing.T) {
+	valid := []byte(`{"synthetic-model":{"input_cost_per_token":0.000001,"output_cost_per_token":0.000002}}`)
+	corrupt := []byte(`{"synthetic-model":{"input_cost_per_token":0.000009,"output_cost_per_token":0.000009}}`)
+	var downloads atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/hash" {
+			_, _ = fmt.Fprintln(w, hashDocument(valid))
+			return
+		}
+		downloads.Add(1)
+		_, _ = w.Write(valid)
+	}))
+	defer server.Close()
+	dir := t.TempDir()
+	cache := filepath.Join(dir, "prices.json")
+	hashPath := filepath.Join(dir, "prices.sha256")
+	if err := os.WriteFile(cache, corrupt, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(hashPath, []byte(hashDocument(valid)), 0600); err != nil {
+		t.Fatal(err)
+	}
+	s, err := New(Config{URL: server.URL, HashURL: server.URL + "/hash", CachePath: cache, HashPath: hashPath})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := s.Lookup("synthetic-model"); ok {
+		t.Fatal("published cached prices with a mismatched hash")
+	}
+	if err := s.Refresh(context.Background()); err != nil || downloads.Load() != 1 {
+		t.Fatalf("refresh did not replace corrupted cache: downloads=%d err=%v", downloads.Load(), err)
+	}
+}
+
+func TestRefreshDoesNotPublishWhenCacheWriteFails(t *testing.T) {
+	document := []byte(`{"synthetic-model":{"input_cost_per_token":0.000001,"output_cost_per_token":0.000002}}`)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/hash" {
+			_, _ = fmt.Fprintln(w, hashDocument(document))
+			return
+		}
+		_, _ = w.Write(document)
+	}))
+	defer server.Close()
+	s, err := New(Config{URL: server.URL, HashURL: server.URL + "/hash", CachePath: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Refresh(context.Background()); err == nil {
+		t.Fatal("expected cache write failure")
+	}
+	if _, ok := s.Lookup("synthetic-model"); ok {
+		t.Fatal("published prices that were not persisted")
 	}
 }
 

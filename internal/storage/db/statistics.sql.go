@@ -211,13 +211,16 @@ func (q *Queries) ListStatistics(ctx context.Context, arg ListStatisticsParams) 
 	return items, nil
 }
 
-const pruneStatistics = `-- name: PruneStatistics :exec
-DELETE FROM usage_daily WHERE day<?1
+const pruneStatistics = `-- name: PruneStatistics :execrows
+DELETE FROM usage_daily WHERE rowid IN (SELECT old.rowid FROM usage_daily old WHERE old.day<?1 LIMIT 500)
 `
 
-func (q *Queries) PruneStatistics(ctx context.Context, beforeDay int64) error {
-	_, err := q.db.ExecContext(ctx, pruneStatistics, beforeDay)
-	return err
+func (q *Queries) PruneStatistics(ctx context.Context, beforeDay int64) (int64, error) {
+	result, err := q.db.ExecContext(ctx, pruneStatistics, beforeDay)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const recordStatistics = `-- name: RecordStatistics :exec

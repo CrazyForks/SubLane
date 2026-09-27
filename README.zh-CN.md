@@ -37,15 +37,15 @@ SubLane 将 AI 订阅账号整合为统一网关，并用独立工作空间隔�
 
 ## 快速开始
 
-安装 Docker、Compose、curl 和 jq 后，运行：
+安装 curl 和校验工具后，运行交互式安装脚本，选择 Docker Compose 或 Linux 预编译二进制，以及不使用代理、Caddy 或 Nginx：
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/murongg/SubLane/main/scripts/install.sh | bash
 ```
 
-打开 http://127.0.0.1:8080，按引导创建管理员并为第一个工作空间命名。接入订阅账号并将其加入账号池，再创建个人密钥接入客户端。先按[第一次使用](https://sublane.dev/docs/zh/quickstart)跑通一次调用；更多工作空间和额度限制之后再按需设置。
+Docker 模式需要 Docker Compose；二进制模式需要 Linux 和可用的 systemd 用户管理器。没有交互终端时，脚本保持原先的“Docker 且不配置代理”默认值。未填写域名时，生成的代理配置只监听本机 HTTP。打开安装器打印的地址，按引导创建管理员并为第一个工作空间命名。接入订阅账号并将其加入账号池，再创建个人密钥接入客户端。先按[第一次使用](https://sublane.dev/docs/zh/quickstart)跑通一次调用；更多工作空间和额度限制之后再按需设置。
 
-脚本会在 `./sublane` 安装最新正式版，没有正式版时使用最新预发布版。数据保存在 Docker 数据卷中，不会覆盖已有目录。自定义参数、手动 Compose 部署、HTTPS 和升级步骤见[部署文档](https://sublane.dev/docs/zh/deployment)。
+脚本会在 `./sublane` 安装最新正式版，没有正式版时使用最新预发布版。Docker 模式使用数据卷；二进制模式使用私有数据目录和 systemd 用户服务。脚本不会覆盖已有目录。自定义参数、代理配置、HTTPS 和升级步骤见[部署文档](https://sublane.dev/docs/zh/deployment)。
 
 ## 本地开发
 

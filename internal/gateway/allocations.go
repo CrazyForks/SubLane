@@ -6,7 +6,6 @@ import (
 	"errors"
 
 	"github.com/murongg/SubLane/internal/allocations"
-	"github.com/murongg/SubLane/internal/pricing"
 	"github.com/murongg/SubLane/internal/storage/db"
 )
 
@@ -18,7 +17,6 @@ func (s *Service) Allocations() *allocations.Service {
 	return service
 }
 
-func (s *Service) Pricing() *pricing.Service { return s.pricing }
 func (e *observation) settleAllocation(ctx context.Context, q *db.Queries) error {
 	if !e.allocationTracked {
 		return nil

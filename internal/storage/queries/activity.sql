@@ -11,8 +11,8 @@ output_reported=usage_hourly.output_reported+excluded.output_reported;
 -- name: GetHourlyCoverage :one
 SELECT value FROM settings WHERE key='usage.hourly.started_at';
 
--- name: PruneHourlyUsage :exec
-DELETE FROM usage_hourly WHERE hour<sqlc.arg(before_hour);
+-- name: PruneHourlyUsage :execrows
+DELETE FROM usage_hourly WHERE rowid IN (SELECT old.rowid FROM usage_hourly old WHERE old.hour<sqlc.arg(before_hour) LIMIT 500);
 
 -- name: ListHourlyActivity :many
 SELECT CAST((CAST(strftime('%w',h.hour,'unixepoch') AS INTEGER)+6)%7 AS INTEGER) AS weekday,

@@ -7,7 +7,9 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -237,6 +239,75 @@ func TestLoginThrottleIgnoresForwardedPeerHeaders(t *testing.T) {
 	}
 }
 
+func TestTrustedProxyUsesRightmostUntrustedAddress(t *testing.T) {
+	trusted := []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8"), netip.MustParsePrefix("198.51.100.0/24")}
+	r := httptest.NewRequest(http.MethodPost, "http://example.test/api/auth/login", nil)
+	r.RemoteAddr = "127.0.0.1:1234"
+	r.Header.Set("X-Forwarded-For", "203.0.113.9, 192.0.2.4, 198.51.100.8")
+	if got := peerAddress(r, trusted); got != "192.0.2.4" {
+		t.Fatalf("trusted chain selected %q", got)
+	}
+	r.RemoteAddr = "192.0.2.10:1234"
+	if got := peerAddress(r, trusted); got != "192.0.2.10" {
+		t.Fatalf("untrusted direct peer selected %q", got)
+	}
+}
+
+func TestIndependentPeersDoNotShareGlobalLoginBucket(t *testing.T) {
+	l := newLoginLimiter()
+	for i := 0; i < 60; i++ {
+		if retry := l.allow("192.0.2." + strconv.Itoa(i)); retry != 0 {
+			t.Fatalf("independent peer %d was blocked: %d", i, retry)
+		}
+	}
+	if retry := l.allow("198.51.100.1"); retry != 0 {
+		t.Fatalf("one peer exhausted a site-wide bucket: %d", retry)
+	}
+}
+
+func TestInvitationRegistrationDoesNotConsumeLoginAttempts(t *testing.T) {
+	h := authFixture(t, "")
+	for i := 0; i < 5; i++ {
+		result := request(h, http.MethodPost, "/api/auth/register", "http://example.test", map[string]string{
+			"token": "synthetic-invalid-token", "username": "synthetic-user", "password": "synthetic-password",
+		}, nil)
+		if result.Code == http.StatusTooManyRequests {
+			t.Fatalf("registration attempt %d was throttled", i)
+		}
+	}
+	result := request(h, http.MethodPost, "/api/auth/login", "http://example.test", map[string]string{
+		"username": "synthetic-user", "password": "synthetic-password",
+	}, nil)
+	if result.Code == http.StatusTooManyRequests {
+		t.Fatal("registration exhausted the login bucket")
+	}
+}
+
+func TestLoginAttemptsAreSharedAcrossWorkspaceHandlers(t *testing.T) {
+	ctx := context.Background()
+	connection, err := storage.Open(ctx, filepath.Join(t.TempDir(), "synthetic.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connection.Close()
+	identity, err := auth.New(connection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	shared := NewLoginLimiter()
+	first := New(Options{Auth: identity, LoginLimiter: shared})
+	second := New(Options{Auth: identity, TenantID: 2, LoginLimiter: shared})
+	body := map[string]string{"username": "synthetic-user", "password": "synthetic-password"}
+	for i := 0; i < 5; i++ {
+		if got := request(first, http.MethodPost, "/api/auth/login", "http://example.test", body, nil).Code; got == http.StatusTooManyRequests {
+			t.Fatalf("early login throttle: %d", i)
+		}
+	}
+	if got := request(second, http.MethodPost, "/api/auth/login", "http://example.test", body, nil).Code; got != http.StatusTooManyRequests {
+		t.Fatalf("workspace switch bypassed login limit: %d", got)
+	}
+}
+
 func TestLimiterExpiresAndBoundsPeerState(t *testing.T) {
 	now := time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)
 	l := newLoginLimiter()
@@ -255,10 +326,17 @@ func TestLimiterExpiresAndBoundsPeerState(t *testing.T) {
 	}
 	l.peers = make(map[string]attemptWindow)
 	for i := 0; i < maxLoginPeers; i++ {
-		l.peers[string(rune(i))] = attemptWindow{reset: now.Add(time.Minute)}
+		lastSeen := now
+		if i == 0 {
+			lastSeen = now.Add(-time.Minute)
+		}
+		l.peers[string(rune(i))] = attemptWindow{reset: now.Add(time.Minute), lastSeen: lastSeen}
 	}
-	if l.allow("new-peer") == 0 || len(l.peers) > maxLoginPeers {
-		t.Fatal("unbounded peer state")
+	if l.allow("new-peer") != 0 || len(l.peers) != maxLoginPeers {
+		t.Fatal("new peer was blocked or peer state grew without bound")
+	}
+	if _, exists := l.peers[string(rune(0))]; exists {
+		t.Fatal("oldest peer was not evicted")
 	}
 }
 

@@ -79,7 +79,9 @@ AND started_at>=sqlc.arg(started_from) AND started_at<sqlc.arg(started_to)
 AND mode=sqlc.arg(mode) AND state IN ('active','pending');
 -- name: ListAllocationPending :many
 SELECT * FROM allocation_entries WHERE scheme_id=sqlc.arg(scheme_id) AND (sqlc.arg(user_id)=0 OR user_id=sqlc.arg(user_id)) AND state='pending' ORDER BY started_at DESC,request_id DESC LIMIT 256;
--- name: PruneAllocations :exec
-DELETE FROM allocation_entries WHERE state='settled' AND reset_at<sqlc.arg(before);
+-- name: PruneAllocations :execrows
+DELETE FROM allocation_entries WHERE rowid IN (
+ SELECT old.rowid FROM allocation_entries old WHERE old.state='settled' AND old.reset_at<sqlc.arg(before) LIMIT 500
+);
 -- name: AccountHasAllocation :one
 SELECT EXISTS(SELECT 1 FROM group_accounts ga JOIN allocation_schemes s ON s.group_id=ga.group_id WHERE ga.account_id=?);

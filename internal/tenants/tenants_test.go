@@ -2,12 +2,38 @@ package tenants
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"strconv"
 	"testing"
 
 	"github.com/murongg/SubLane/internal/storage"
 )
+
+func TestCreateCapsOwnedWorkspacesAtTen(t *testing.T) {
+	ctx := context.Background()
+	connection, err := storage.Open(ctx, filepath.Join(t.TempDir(), "synthetic.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connection.Close()
+	if _, err := connection.ExecContext(ctx, "INSERT INTO users(id,username,role,password_hash,enabled,created_at) VALUES(2,'synthetic-owner','member','synthetic-hash',1,1)"); err != nil {
+		t.Fatal(err)
+	}
+	service := New(connection)
+	for i := 0; i < 10; i++ {
+		if _, err := service.Create(ctx, 2, "Workspace "+strconv.Itoa(i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	listed, err := service.List(ctx, 2)
+	if err != nil || len(listed) != 10 {
+		t.Fatalf("owned workspaces: count=%d err=%v", len(listed), err)
+	}
+	if _, err := service.Create(ctx, 2, "Eleventh workspace"); !errors.Is(err, ErrWorkspaceLimit) {
+		t.Fatalf("eleventh workspace should be rejected: %v", err)
+	}
+}
 
 func TestMembershipIsScopedToTenant(t *testing.T) {
 	ctx := context.Background()

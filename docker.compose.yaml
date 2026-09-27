@@ -7,6 +7,7 @@ services:
       SUBLANE_ADDR: 0.0.0.0:8080
       SUBLANE_DATA_DIR: /data
       SUBLANE_PUBLIC_URL: ${SUBLANE_PUBLIC_URL:-}
+      SUBLANE_TRUSTED_PROXIES: ${SUBLANE_TRUSTED_PROXIES:-}
       SUBLANE_LOG_LEVEL: ${SUBLANE_LOG_LEVEL:-info}
     volumes:
       - sublane-data:/data

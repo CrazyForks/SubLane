@@ -1508,7 +1508,7 @@ func TestRetentionKeepsUnresolvedDebtAndCurrentBalances(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err = Prune(ctx, q, now-90*86400); err != nil {
+	if _, err = Prune(ctx, q, now-90*86400); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = q.GetAllocationEntry(ctx, "synthetic-old"); !errors.Is(err, sql.ErrNoRows) {

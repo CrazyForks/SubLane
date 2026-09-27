@@ -277,6 +277,6 @@ func (s *Service) Settle(ctx context.Context, scheme int64, id string, c Complet
 }
 
 // Prune only closed accounting periods; unresolved requests remain available.
-func Prune(ctx context.Context, q *db.Queries, before int64) error {
+func Prune(ctx context.Context, q *db.Queries, before int64) (int64, error) {
 	return q.PruneAllocations(ctx, before)
 }

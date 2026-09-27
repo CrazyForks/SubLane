@@ -65,12 +65,6 @@ func (s *Service) statistics(ctx context.Context, userID, days int64) (Statistic
 	defer tx.Rollback()
 	q := s.queries.WithTx(tx)
 	// All summaries use one snapshot; concurrent completions cannot make totals and breakdowns disagree.
-	if err := q.PruneStatistics(ctx, today-89*86400); err != nil {
-		return page, err
-	}
-	if err := q.PruneHourlyUsage(ctx, today-89*86400); err != nil {
-		return page, err
-	}
 	page.Activity, err = readActivity(ctx, q, s.tenantID, userID, page.FromDay, page.ToDay, now.Unix())
 	if err != nil {
 		return page, err

@@ -17,6 +17,7 @@ import (
 	"github.com/murongg/SubLane/internal/apikey"
 	"github.com/murongg/SubLane/internal/auth"
 	"github.com/murongg/SubLane/internal/config"
+	"github.com/murongg/SubLane/internal/gateway"
 	"github.com/murongg/SubLane/internal/pricing"
 	"github.com/murongg/SubLane/internal/server"
 	"github.com/murongg/SubLane/internal/storage"
@@ -128,9 +129,17 @@ func run() error {
 	defer priceCatalog.Close()
 	registry := &tenantRegistry{ctx: ctx, db: db, vault: cipher, auth: authentication,
 		tenants: tenancy, provider: provider, pricing: priceCatalog, versions: codexVersions, timeZone: timeZone,
-		assets: web.Assets(), dataDir: cfg.DataDir, publicURL: cfg.PublicURL,
+		assets: web.Assets(), dataDir: cfg.DataDir, publicURL: cfg.PublicURL, trustedProxies: cfg.TrustedProxies,
 		version: version, started: time.Now()}
 	defer registry.Close()
+	registry.Start()
+	maintenanceCtx, stopMaintenance := context.WithCancel(ctx)
+	maintenanceDone := make(chan struct{})
+	go func() {
+		defer close(maintenanceDone)
+		gateway.MaintainHistory(maintenanceCtx, db)
+	}()
+	defer func() { stopMaintenance(); <-maintenanceDone }()
 	srv := &http.Server{
 		Addr:              cfg.Addr,
 		Handler:           server.NewMulti(db, authentication, tenancy, cfg.PublicURL, registry.Handler),
