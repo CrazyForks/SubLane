@@ -492,6 +492,7 @@ type poolModelCatalog struct {
 	unavailable bool
 }
 
+// Both loaders sort models after all accounts are aggregated; this step only deduplicates.
 func (catalog *poolModelCatalog) addAccount(provider string, snapshot []byte, revision int64, seen map[string]bool) {
 	accountCatalog, err := accounts.DecodeCatalog(snapshot, revision)
 	if err != nil || accountCatalog.UpdatedAt == 0 {
