@@ -67,9 +67,6 @@ func (s *Service) requests(ctx context.Context, userID int64, f RequestFilter) (
 		return page, accounts.ErrInput
 	}
 	since := s.now().Add(-7 * 24 * time.Hour).Unix()
-	if err := s.queries.PruneRequests(ctx, since); err != nil {
-		return page, err
-	}
 	rows, err := s.queries.ListRequests(ctx, db.ListRequestsParams{TenantID: s.tenantID, UserID: userID, Cursor: f.Cursor, AccountID: f.AccountID, Outcome: f.Outcome, Since: max(since, f.From), UntilTime: f.Until, MemberID: f.MemberID, KeyID: f.KeyID, Model: f.Model, RequestID: f.RequestID})
 	if err != nil {
 		return page, err

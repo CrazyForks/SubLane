@@ -86,13 +86,16 @@ func (q *Queries) ListHourlyActivity(ctx context.Context, arg ListHourlyActivity
 	return items, nil
 }
 
-const pruneHourlyUsage = `-- name: PruneHourlyUsage :exec
-DELETE FROM usage_hourly WHERE hour<?1
+const pruneHourlyUsage = `-- name: PruneHourlyUsage :execrows
+DELETE FROM usage_hourly WHERE rowid IN (SELECT old.rowid FROM usage_hourly old WHERE old.hour<?1 LIMIT 500)
 `
 
-func (q *Queries) PruneHourlyUsage(ctx context.Context, beforeHour int64) error {
-	_, err := q.db.ExecContext(ctx, pruneHourlyUsage, beforeHour)
-	return err
+func (q *Queries) PruneHourlyUsage(ctx context.Context, beforeHour int64) (int64, error) {
+	result, err := q.db.ExecContext(ctx, pruneHourlyUsage, beforeHour)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const recordHourlyUsage = `-- name: RecordHourlyUsage :exec

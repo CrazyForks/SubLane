@@ -29,8 +29,8 @@ SELECT CAST(
  AND s.day=sqlc.arg(day) AND s.user_id=sqlc.arg(user_id) AND s.model!='[other models]')<64
 AS INTEGER);
 
--- name: PruneStatistics :exec
-DELETE FROM usage_daily WHERE day<sqlc.arg(before_day);
+-- name: PruneStatistics :execrows
+DELETE FROM usage_daily WHERE rowid IN (SELECT old.rowid FROM usage_daily old WHERE old.day<sqlc.arg(before_day) LIMIT 500);
 
 -- name: GetStatisticsTotals :one
 SELECT CAST(COALESCE(SUM(s.requests),0) AS INTEGER) AS requests,

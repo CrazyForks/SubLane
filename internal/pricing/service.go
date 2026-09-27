@@ -53,9 +53,9 @@ type Service struct {
 func New(cfg Config) (*Service, error) {
 	if cfg.URL == "" {
 		cfg.URL = DefaultURL
-	}
-	if cfg.HashURL == "" {
-		cfg.HashURL = DefaultHashURL
+		if cfg.HashURL == "" {
+			cfg.HashURL = DefaultHashURL
+		}
 	}
 	if cfg.Interval <= 0 {
 		cfg.Interval = 6 * time.Hour
@@ -64,8 +64,10 @@ func New(cfg Config) (*Service, error) {
 		cfg.HTTPClient = &http.Client{Timeout: 30 * time.Second}
 	}
 	s := &Service{config: cfg, client: cfg.HTTPClient, prices: map[string]Price{}, done: make(chan struct{})}
+	var cacheRaw []byte
 	if cfg.CachePath != "" {
 		if raw, err := os.ReadFile(cfg.CachePath); err == nil {
+			cacheRaw = raw
 			if parsed, e := parsePrices(raw, "cache"); e == nil {
 				s.prices = parsed
 			}
@@ -75,6 +77,11 @@ func New(cfg Config) (*Service, error) {
 		if raw, err := os.ReadFile(cfg.HashPath); err == nil {
 			s.cacheHash = normalizeHash(string(raw))
 		}
+	}
+	if cfg.HashURL != "" && (s.cacheHash == "" || hashDocument(cacheRaw) != s.cacheHash) {
+		// A cache and its saved digest are a pair; a partial write must trigger a fresh download.
+		s.prices = map[string]Price{}
+		s.cacheHash = ""
 	}
 	if err := s.mergeFile(cfg.FallbackPath, "fallback"); err != nil {
 		return nil, err
@@ -206,6 +213,9 @@ func (s *Service) Refresh(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	if hash != "" && hashDocument(body) != hash {
+		return errors.New("pricing document SHA-256 mismatch")
+	}
 	parsed, err := parsePrices(body, "remote")
 	if err != nil {
 		return err
@@ -225,9 +235,6 @@ func (s *Service) Refresh(ctx context.Context) error {
 		}
 		parsed = base.prices
 	}
-	s.mu.Lock()
-	s.prices, s.cacheHash = parsed, hash
-	s.mu.Unlock()
 	if s.config.CachePath != "" {
 		if err := atomicWrite(s.config.CachePath, body); err != nil {
 			return err
@@ -238,6 +245,9 @@ func (s *Service) Refresh(ctx context.Context) error {
 			return err
 		}
 	}
+	s.mu.Lock()
+	s.prices, s.cacheHash = parsed, hash
+	s.mu.Unlock()
 	return nil
 }
 
@@ -338,7 +348,14 @@ func normalizeHash(raw string) string {
 	if len(fields) == 0 {
 		return ""
 	}
-	return strings.ToLower(fields[0])
+	hash := strings.ToLower(fields[0])
+	if len(hash) != 64 {
+		return ""
+	}
+	if _, err := hex.DecodeString(hash); err != nil {
+		return ""
+	}
+	return hash
 }
 
 func atomicWrite(path string, data []byte) error {

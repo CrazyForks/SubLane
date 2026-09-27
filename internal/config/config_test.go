@@ -1,6 +1,29 @@
 package config
 
-import "testing"
+import (
+	"net/netip"
+	"testing"
+)
+
+func TestTrustedProxyCIDRs(t *testing.T) {
+	cfg, err := Load(func(k string) string {
+		if k == "SUBLANE_TRUSTED_PROXIES" {
+			return "127.0.0.0/8, ::1/128"
+		}
+		return ""
+	})
+	if err != nil || len(cfg.TrustedProxies) != 2 || !cfg.TrustedProxies[0].Contains(netip.MustParseAddr("127.0.0.1")) {
+		t.Fatalf("trusted proxies: %+v %v", cfg.TrustedProxies, err)
+	}
+	if _, err := Load(func(k string) string {
+		if k == "SUBLANE_TRUSTED_PROXIES" {
+			return "0.0.0.0/0,invalid"
+		}
+		return ""
+	}); err == nil {
+		t.Fatal("invalid trusted proxy was accepted")
+	}
+}
 
 func TestDefaultsAndOverrides(t *testing.T) {
 	cfg, err := Load(func(string) string { return "" })

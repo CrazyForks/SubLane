@@ -91,6 +91,8 @@ func (h *multiHTTP) create(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, 400, map[string]string{"error": "invalid_input"})
 		case errors.Is(err, tenants.ErrForbidden):
 			writeJSON(w, 403, map[string]string{"error": "forbidden"})
+		case errors.Is(err, tenants.ErrWorkspaceLimit):
+			writeJSON(w, 409, map[string]string{"error": "workspace_limit_reached"})
 		default:
 			writeJSON(w, 503, map[string]string{"error": "unavailable"})
 		}

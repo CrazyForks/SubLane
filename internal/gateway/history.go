@@ -179,18 +179,6 @@ func (e *observation) finish(outcome, code, penalty, retry string) {
 				err = recordStatistics(ctx, q, e.record)
 			}
 			if err == nil {
-				err = allocations.Prune(ctx, q, s.now().Add(-90*24*time.Hour).Unix())
-			}
-			if err == nil {
-				err = q.PruneStatistics(ctx, s.now().UTC().Truncate(24*time.Hour).Unix()-89*86400)
-			}
-			if err == nil {
-				err = q.PruneHourlyUsage(ctx, s.now().UTC().Truncate(24*time.Hour).Unix()-89*86400)
-			}
-			if err == nil {
-				err = q.PruneRequests(ctx, s.now().Add(-7*24*time.Hour).Unix())
-			}
-			if err == nil {
 				err = tx.Commit()
 			}
 		}

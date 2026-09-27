@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { createWorkspace } from '@/lib/tenants'
+import { ApiError } from '@/lib/request'
 import { selectWorkspace } from '@/lib/workspace'
 import { Button } from './ui/Button'
 import { Input } from './ui/Input'
@@ -99,7 +100,10 @@ export function WorkspaceCreate({
             </div>
             {mutation.isError && (
               <p role="alert" className="text-sm text-error">
-                {t('workspaceCreateFailed')}
+                {mutation.error instanceof ApiError &&
+                mutation.error.code === 'workspace_limit_reached'
+                  ? t('workspaceLimitReached')
+                  : t('workspaceCreateFailed')}
               </p>
             )}
             <Button type="submit" disabled={mutation.isPending}>

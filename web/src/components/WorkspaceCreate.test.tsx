@@ -32,3 +32,29 @@ it('creates a workspace through the global endpoint', async () => {
   await waitFor(() => expect(created).toHaveBeenCalledWith(3))
   expect(fetchMock.mock.calls[0][0]).toBe('/api/workspaces')
 })
+
+it('explains the owner workspace limit', async () => {
+  const user = userEvent.setup()
+  vi.stubGlobal(
+    'fetch',
+    vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ error: 'workspace_limit_reached' }), {
+        status: 409,
+      }),
+    ),
+  )
+  render(
+    <QueryClientProvider client={new QueryClient()}>
+      <WorkspaceCreate />
+    </QueryClientProvider>,
+  )
+  await user.click(screen.getByRole('button', { name: 'Create workspace' }))
+  await user.type(
+    screen.getByRole('textbox', { name: 'Workspace name' }),
+    'Synthetic workspace',
+  )
+  await user.click(screen.getByRole('button', { name: 'Save workspace' }))
+  expect(
+    await screen.findByText('You can own up to 10 workspaces.'),
+  ).toBeTruthy()
+})

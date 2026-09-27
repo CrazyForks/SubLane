@@ -247,14 +247,20 @@ func TestRetryAfterAndHistoryRetention(t *testing.T) {
 		t.Fatal("history page invalid", err)
 	}
 	var count int
+	if err := service.db.QueryRow("SELECT count(*) FROM request_records").Scan(&count); err != nil || count != 5003 {
+		t.Fatal("history read changed stored records", count, err)
+	}
+	if err := pruneHistory(context.Background(), service.db, now); err != nil {
+		t.Fatal(err)
+	}
 	if err := service.db.QueryRow("SELECT count(*) FROM request_records").Scan(&count); err != nil || count > 5000 {
-		t.Fatal("history not bounded", count, err)
+		t.Fatal("maintenance did not bound history", count, err)
 	}
 	previous := page.Requests[0].ID
 	if _, err := service.db.Exec("UPDATE request_records SET started_at=1"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.Requests(context.Background(), RequestFilter{}); err != nil {
+	if err := pruneHistory(context.Background(), service.db, now); err != nil {
 		t.Fatal(err)
 	}
 	if err := service.queries.RecordRequest(context.Background(), db.RecordRequestParams{UserID: 1, GroupID: 1, Transport: "http", Operation: "responses", Outcome: "success", StartedAt: now.Unix()}); err != nil {

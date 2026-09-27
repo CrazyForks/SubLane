@@ -158,3 +158,41 @@ func TestRuntimeRoutesManagementToOwnedWorkspace(t *testing.T) {
 		t.Fatalf("foreign member password was changed: %v", err)
 	}
 }
+
+func TestIdleRuntimeClosesOnlyAfterLastRequest(t *testing.T) {
+	ctx := context.Background()
+	connection, err := storage.Open(ctx, filepath.Join(t.TempDir(), "synthetic.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connection.Close()
+	now := time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)
+	registry := &tenantRegistry{ctx: ctx, db: connection, now: func() time.Time { return now }}
+	defer registry.Close()
+	handler := registry.Handler(1)
+	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/healthz", nil))
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	registry.runtimes[1].handler = http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		close(entered)
+		<-release
+	})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/healthz", nil))
+	}()
+	<-entered
+	now = now.Add(runtimeIdleTimeout + time.Second)
+	registry.reapIdle()
+	if len(registry.runtimes) != 1 {
+		t.Fatal("active runtime was removed")
+	}
+	close(release)
+	<-done
+	now = now.Add(runtimeIdleTimeout + time.Second)
+	registry.reapIdle()
+	if len(registry.runtimes) != 0 {
+		t.Fatal("idle runtime was retained")
+	}
+}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io/fs"
 	"net/http"
+	"net/netip"
 	"path"
 	"strings"
 	"time"
@@ -25,24 +26,27 @@ import (
 )
 
 type Options struct {
-	DataDir       string
-	Assets        fs.FS
-	Version       string
-	StartedAt     time.Time
-	Ping          func(context.Context) error
-	Audit         *audit.Service
-	Auth          *auth.Service
-	Keys          *apikey.Service
-	Accounts      *accounts.Service
-	OAuth         *oauth.Flow
-	Gateway       *gateway.Service
-	Groups        *groups.Service
-	Tenants       *tenants.Service
-	TenantID      int64
-	PublicURL     string
-	CodexVersions *versions.Service
-	TimeZone      *timezone.Service
-	ProxyCheck    func(context.Context, string) (upstream.ProxyCheck, error)
+	DataDir           string
+	Assets            fs.FS
+	Version           string
+	StartedAt         time.Time
+	Ping              func(context.Context) error
+	Audit             *audit.Service
+	Auth              *auth.Service
+	Keys              *apikey.Service
+	Accounts          *accounts.Service
+	OAuth             *oauth.Flow
+	Gateway           *gateway.Service
+	Groups            *groups.Service
+	Tenants           *tenants.Service
+	TenantID          int64
+	PublicURL         string
+	TrustedProxies    []netip.Prefix
+	LoginLimiter      *LoginLimiter
+	EnrollmentLimiter *LoginLimiter
+	CodexVersions     *versions.Service
+	TimeZone          *timezone.Service
+	ProxyCheck        func(context.Context, string) (upstream.ProxyCheck, error)
 }
 
 func New(o Options) http.Handler {
@@ -57,7 +61,14 @@ func New(o Options) http.Handler {
 	if tenantID == 0 {
 		tenantID = 1
 	}
-	login := &authHTTP{audit: o.Audit, service: o.Auth, tenants: o.Tenants, timeZone: o.TimeZone, tenantID: tenantID, publicURL: o.PublicURL, limiter: newLoginLimiter()}
+	loginLimiter, enrollmentLimiter := o.LoginLimiter, o.EnrollmentLimiter
+	if loginLimiter == nil {
+		loginLimiter = NewLoginLimiter()
+	}
+	if enrollmentLimiter == nil {
+		enrollmentLimiter = NewLoginLimiter()
+	}
+	login := &authHTTP{audit: o.Audit, service: o.Auth, tenants: o.Tenants, timeZone: o.TimeZone, tenantID: tenantID, publicURL: o.PublicURL, limiter: loginLimiter, enrollmentLimiter: enrollmentLimiter, trustedProxies: o.TrustedProxies}
 	keys := &keyHTTP{groups: o.Groups, service: o.Keys, gateway: o.Gateway, publicURL: o.PublicURL, sockets: make(chan struct{}, 8)}
 	accountManagement := &accountHTTP{service: o.Accounts, oauth: o.OAuth, gateway: o.Gateway}
 	memberManagement := &memberHTTP{gateway: o.Gateway}

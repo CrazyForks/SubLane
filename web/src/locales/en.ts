@@ -8,6 +8,7 @@ export const en = {
   workspaceName: 'Workspace name',
   workspaceNameInvalid: 'Enter a workspace name with up to 64 characters.',
   workspaceCreateFailed: 'Could not create the workspace. Try again.',
+  workspaceLimitReached: 'You can own up to 10 workspaces.',
   workspaceListFailed: 'Could not load workspaces.',
   workspaceSave: 'Save workspace',
   allocationPause: 'Pause resource allowance',

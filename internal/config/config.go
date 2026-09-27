@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/netip"
 	"net/url"
 	"strconv"
 	"strings"
@@ -15,6 +16,7 @@ type Config struct {
 	DataDir         string
 	LogLevel        slog.Level
 	PublicURL       string
+	TrustedProxies  []netip.Prefix
 	PricingURL      string
 	PricingHashURL  string
 	PricingCache    string
@@ -55,6 +57,15 @@ func Load(getenv func(string) string) (Config, error) {
 			}
 		}
 		c.PublicURL = u.Scheme + "://" + host
+	}
+	if v := getenv("SUBLANE_TRUSTED_PROXIES"); v != "" {
+		for _, part := range strings.Split(v, ",") {
+			prefix, err := netip.ParsePrefix(strings.TrimSpace(part))
+			if err != nil {
+				return c, fmt.Errorf("SUBLANE_TRUSTED_PROXIES must be comma-separated IP CIDRs: %w", err)
+			}
+			c.TrustedProxies = append(c.TrustedProxies, prefix.Masked())
+		}
 	}
 	c.PricingURL = getenv("SUBLANE_PRICING_URL")
 	c.PricingHashURL = getenv("SUBLANE_PRICING_HASH_URL")

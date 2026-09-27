@@ -14,11 +14,14 @@ import (
 )
 
 var (
-	ErrForbidden     = errors.New("tenant_forbidden")
-	ErrInput         = errors.New("tenant_invalid_input")
-	ErrNotFound      = errors.New("tenant_member_not_found")
-	ErrAlreadyMember = errors.New("tenant_member_exists")
+	ErrForbidden      = errors.New("tenant_forbidden")
+	ErrInput          = errors.New("tenant_invalid_input")
+	ErrNotFound       = errors.New("tenant_member_not_found")
+	ErrAlreadyMember  = errors.New("tenant_member_exists")
+	ErrWorkspaceLimit = errors.New("workspace_limit_reached")
 )
+
+const MaxOwnedWorkspaces = 10
 
 type Role string
 
@@ -188,6 +191,13 @@ func (s *Service) Create(ctx context.Context, ownerUserID int64, name string) (T
 	}
 	if !enabled {
 		return Tenant{}, ErrForbidden
+	}
+	var owned int
+	if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM tenants WHERE owner_user_id=?", ownerUserID).Scan(&owned); err != nil {
+		return Tenant{}, err
+	}
+	if owned >= MaxOwnedWorkspaces {
+		return Tenant{}, ErrWorkspaceLimit
 	}
 	now := time.Now().Unix()
 	result, err := tx.ExecContext(ctx, "INSERT INTO tenants(name,owner_user_id,created_at) VALUES(?,?,?)", name, ownerUserID, now)

@@ -649,13 +649,18 @@ func (q *Queries) NextAllocationRevision(ctx context.Context, arg NextAllocation
 	return i, err
 }
 
-const pruneAllocations = `-- name: PruneAllocations :exec
-DELETE FROM allocation_entries WHERE state='settled' AND reset_at<?1
+const pruneAllocations = `-- name: PruneAllocations :execrows
+DELETE FROM allocation_entries WHERE rowid IN (
+ SELECT old.rowid FROM allocation_entries old WHERE old.state='settled' AND old.reset_at<?1 LIMIT 500
+)
 `
 
-func (q *Queries) PruneAllocations(ctx context.Context, before int64) error {
-	_, err := q.db.ExecContext(ctx, pruneAllocations, before)
-	return err
+func (q *Queries) PruneAllocations(ctx context.Context, before int64) (int64, error) {
+	result, err := q.db.ExecContext(ctx, pruneAllocations, before)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const recoverAllocationEntries = `-- name: RecoverAllocationEntries :exec

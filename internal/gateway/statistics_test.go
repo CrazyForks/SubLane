@@ -101,6 +101,12 @@ func TestStatisticsShareHistoryTransactionAndRetainOnlyNinetyDays(t *testing.T) 
 		t.Fatal("old aggregate retained", value, err)
 	}
 	var rows int
+	if err := s.db.QueryRow("SELECT COUNT(*) FROM usage_daily").Scan(&rows); err != nil || rows != 1 {
+		t.Fatal("statistics read changed stored rows", rows, err)
+	}
+	if err := pruneHistory(ctx, s.db, s.now()); err != nil {
+		t.Fatal(err)
+	}
 	if err := s.db.QueryRow("SELECT COUNT(*) FROM usage_daily").Scan(&rows); err != nil || rows != 0 {
 		t.Fatal("expired rows not reclaimed", rows, err)
 	}
