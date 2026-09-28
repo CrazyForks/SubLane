@@ -25,6 +25,43 @@ func TestUnknownWindowOverrideHasSpecificAPIError(t *testing.T) {
 	}
 }
 
+func TestOwnerAllowancePoolChoicesAndKeyCreation(t *testing.T) {
+	f := newForwardFixture(t, func(http.ResponseWriter, *http.Request) { t.Error("unexpected upstream call") })
+	ctx := context.Background()
+	owner, err := f.identity.Login(ctx, "owner-test", "owner pass 42")
+	if err != nil {
+		t.Fatal(err)
+	}
+	scheme, err := f.forwarding.Allocations().SaveScheme(ctx, 0, allocations.SchemeInput{
+		Name: "Synthetic owner allowance", GroupID: 1, Enabled: true,
+		Config: allocations.Config{Mode: "tokens", Period: "month", Members: []allocations.Share{{UserID: owner.User.ID, Limit: 100}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cookie := &http.Cookie{Name: sessionCookie, Value: owner.Token}
+	h := f.server.Config.Handler
+	response := request(h, http.MethodGet, "/api/keys/groups", "", nil, cookie)
+	if response.Code != http.StatusOK {
+		t.Fatalf("owner pool choices: %d %s", response.Code, response.Body.String())
+	}
+	var choices struct {
+		Groups []groups.Choice `json:"groups"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &choices); err != nil {
+		t.Fatal(err)
+	}
+	if len(choices.Groups) != 1 || choices.Groups[0].ID != scheme.GroupID || choices.Groups[0].SchemeID != scheme.ID || choices.Groups[0].AccountCount != 1 {
+		t.Fatalf("owner's allocation pool missing: %+v", choices.Groups)
+	}
+	created := request(h, http.MethodPost, "/api/keys", "http://example.test", map[string]any{
+		"name": "Synthetic owner client", "group_id": choices.Groups[0].ID, "scheme_id": choices.Groups[0].SchemeID,
+	}, cookie)
+	if created.Code != http.StatusCreated {
+		t.Fatalf("owner scheme key creation: %d %s", created.Code, created.Body.String())
+	}
+}
+
 func TestWindowedAmountPersonalBalanceResponse(t *testing.T) {
 	f := newForwardFixture(t, func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(200) })
 	ctx := context.Background()
