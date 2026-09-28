@@ -128,6 +128,7 @@ func (s *Service) Open(ctx context.Context, userID, groupID int64, raw []byte, h
 		return nil, upstream.ErrInput
 	}
 	entry.record.Model = model
+	entry.record.ReasoningEffort = requestReasoningEffort(input, kind)
 	requestedModel := model
 	provider, model := groups.SplitModel(model)
 	if model == "" || len(model) > 128 {

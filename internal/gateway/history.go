@@ -47,6 +47,31 @@ func RequestID(ctx context.Context) string {
 
 var safeModel = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._:/()+-]{0,159}$`)
 
+func requestReasoningEffort(input map[string]json.RawMessage, kind Kind) string {
+	var effort string
+	switch kind {
+	case Responses, Compact:
+		var reasoning struct {
+			Effort string `json:"effort"`
+		}
+		if json.Unmarshal(input["reasoning"], &reasoning) != nil {
+			return ""
+		}
+		effort = reasoning.Effort
+	case Chat:
+		if json.Unmarshal(input["reasoning_effort"], &effort) != nil {
+			return ""
+		}
+	}
+	// History keeps only known settings, never arbitrary request text or an inferred default.
+	switch effort {
+	case "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra":
+		return effort
+	default:
+		return ""
+	}
+}
+
 type observation struct {
 	kind               Kind
 	service            *Service

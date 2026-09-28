@@ -154,7 +154,10 @@ func TestFormerProxyCheckArchiveStillRestores(t *testing.T) {
 	if _, err := accounts.New(connection, cipher).CreateProxy(ctx, "Synthetic exit", "http://127.0.0.1:18080"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := connection.ExecContext(ctx, "INSERT INTO schema_migrations(name) VALUES('004_proxy_checks.sql')"); err != nil {
+	// Keep this archive on its historical schema so restore exercises newer migrations.
+	if _, err := connection.ExecContext(ctx, `ALTER TABLE request_records DROP COLUMN reasoning_effort;
+DELETE FROM schema_migrations WHERE name='006_reasoning_effort.sql';
+INSERT INTO schema_migrations(name) VALUES('004_proxy_checks.sql')`); err != nil {
 		t.Fatal(err)
 	}
 	if err := connection.Close(); err != nil {
@@ -183,7 +186,11 @@ func TestFormerProxyCheckArchiveStillRestores(t *testing.T) {
 	}
 	defer restored.Close()
 	var migrationCount int
-	if err := restored.QueryRowContext(ctx, "SELECT count(*) FROM schema_migrations").Scan(&migrationCount); err != nil || migrationCount != 5 {
+	wantMigrations, err := storage.CurrentSchemaVersion()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := restored.QueryRowContext(ctx, "SELECT count(*) FROM schema_migrations").Scan(&migrationCount); err != nil || migrationCount != wantMigrations {
 		t.Fatalf("restored migration history: %d %v", migrationCount, err)
 	}
 	restoredVault, err := vault.Open(filepath.Join(target, keyName), false)

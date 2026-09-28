@@ -328,6 +328,11 @@ function RequestTable({
                       {item.model || '—'}
                     </code>
                     <p className="mt-1 text-xs text-muted-foreground">
+                      {t('requestReasoningEffortValue', {
+                        value: item.reasoning_effort || '—',
+                      })}
+                    </p>
+                    <p className="mt-1 text-xs text-muted-foreground">
                       {item.provider && `${providerLabels[item.provider]} · `}
                       {item.transport === 'websocket'
                         ? 'WebSocket'

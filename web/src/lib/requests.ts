@@ -40,6 +40,7 @@ const recordSchema = z.object({
   account_id: z.string(),
   provider: z.union([z.enum(providers), z.literal('')]),
   model: z.string(),
+  reasoning_effort: z.string().max(32).default(''),
   transport: z.enum(['http', 'websocket']),
   operation: z.enum(['responses', 'chat', 'compact', 'messages', 'gemini']),
   started_at: z.number().int(),
