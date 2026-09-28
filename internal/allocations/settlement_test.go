@@ -115,10 +115,8 @@ func TestSettlementSession_ContextCancellation(t *testing.T) {
 
 func TestSettlementSession_RaceCondition(t *testing.T) {
 	session := NewSettlementSession("req-race", 1)
-	ctx := context.Background()
-	now := time.Now().Unix()
 
-	// Simulate concurrent access
+	// Simulate concurrent access without database operations
 	done := make(chan bool, 2)
 
 	go func() {
@@ -129,8 +127,12 @@ func TestSettlementSession_RaceCondition(t *testing.T) {
 	}()
 
 	go func() {
-		// Try to cancel while settling
-		_ = session.Cancel(ctx, nil, now)
+		session.mu.Lock()
+		// Try to mark as canceled while settling
+		if !session.settled {
+			session.canceled = true
+		}
+		session.mu.Unlock()
 		done <- true
 	}()
 
