@@ -11,14 +11,22 @@ var ErrContextLimit = errors.New("conversation_context_limit")
 
 // Conversation retains bounded, connection-local state for translating incremental WebSocket turns to stateless HTTP.
 type Conversation struct {
-	request    map[string]json.RawMessage
-	output     []json.RawMessage
-	responseID string
-	overflow   bool
+	MaxRequestBody int64
+	request        map[string]json.RawMessage
+	output         []json.RawMessage
+	responseID     string
+	overflow       bool
+}
+
+func (c *Conversation) bodyLimit() int64 {
+	if c.MaxRequestBody > 0 {
+		return c.MaxRequestBody
+	}
+	return upstream.DefaultMaxRequestBody
 }
 
 func (c *Conversation) Normalize(raw []byte) ([]byte, bool, error) {
-	if len(raw) > upstream.MaxBody {
+	if int64(len(raw)) > c.bodyLimit() {
 		return nil, false, ErrContextLimit
 	}
 	var input map[string]json.RawMessage
@@ -88,7 +96,7 @@ func (c *Conversation) Normalize(raw []byte) ([]byte, bool, error) {
 	if err != nil {
 		return nil, false, upstream.ErrInput
 	}
-	if len(normalized) > upstream.MaxBody {
+	if int64(len(normalized)) > c.bodyLimit() {
 		return nil, false, ErrContextLimit
 	}
 	return normalized, prewarm, nil
@@ -108,12 +116,12 @@ func (c *Conversation) Accept(request, event []byte) error {
 	if json.Unmarshal(request, &input) != nil {
 		return upstream.ErrInput
 	}
-	size := len(request)
+	size := int64(len(request))
 	for _, item := range response.Response.Output {
-		size += len(item)
+		size += int64(len(item))
 	}
 	c.responseID = response.Response.ID
-	c.overflow = size > upstream.MaxBody
+	c.overflow = size > c.bodyLimit()
 	if c.overflow {
 		delete(input, "input")
 		c.output = nil

@@ -13,6 +13,58 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+func TestWebsocketConfiguredRequestBodyLimit(t *testing.T) {
+	const limit = 1024
+	var calls atomic.Int32
+	fixture := newForwardingFixture(t, "codex", func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.Header().Set("Content-Type", "text/event-stream")
+		io.WriteString(w, "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_test\",\"output\":[]}}\n\n")
+	}, false, limit)
+	for _, size := range []int{limit - 1, limit, limit + 1} {
+		func() {
+			conn, _, err := websocket.DefaultDialer.Dial(strings.Replace(fixture.server.URL, "http://", "ws://", 1)+"/v1/responses", http.Header{"Authorization": {"Bearer " + fixture.secret}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer conn.Close()
+			conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+			raw := `{"type":"response.create","model":"synthetic-model","input":[]}`
+			raw += strings.Repeat(" ", size-len(raw))
+			if err := conn.WriteMessage(websocket.TextMessage, []byte(raw)); err != nil {
+				t.Fatal(err)
+			}
+			for {
+				_, data, err := conn.ReadMessage()
+				if size > limit {
+					if !websocket.IsCloseError(err, websocket.CloseMessageTooBig) {
+						t.Fatalf("oversized websocket message: %v", err)
+					}
+					return
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				var event struct {
+					Type string `json:"type"`
+				}
+				if err := json.Unmarshal(data, &event); err != nil {
+					t.Fatal(err)
+				}
+				if event.Type == "error" {
+					t.Fatal("request within websocket limit rejected")
+				}
+				if event.Type == "response.completed" {
+					return
+				}
+			}
+		}()
+	}
+	if calls.Load() != 2 {
+		t.Fatalf("oversized websocket message reached upstream: calls=%d", calls.Load())
+	}
+}
+
 func TestWebsocketPrewarmAndPerTurnKeyRevocation(t *testing.T) {
 	var calls atomic.Int32
 	fixture := newForwardFixture(t, func(w http.ResponseWriter, r *http.Request) {

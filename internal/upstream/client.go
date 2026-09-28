@@ -25,7 +25,9 @@ const (
 	// The catalog is version-gated: obsolete clients can receive HTTP 200 with only hidden models.
 	// Keep discovery and its User-Agent aligned with a verified Codex client release.
 	clientVersion = "0.155.1"
-	MaxBody       = 8 << 20
+	// Keep response and event budgets independent of large client requests.
+	MaxBody               = 8 << 20
+	DefaultMaxRequestBody = 128 << 20
 )
 
 const DefaultCodexVersion = clientVersion
@@ -47,6 +49,13 @@ type Client struct {
 	tokenURL, baseURL string
 	registry          *translator.Registry
 	version           func() string
+	maxRequestBody    int64
+}
+
+type Options struct {
+	Transport      http.RoundTripper
+	Version        func() string
+	MaxRequestBody int64
 }
 
 func New() *Client {
@@ -55,11 +64,7 @@ func New() *Client {
 
 // The resolver is installed before startup and returns an already validated version.
 func NewWithVersion(version func() string) *Client {
-	transport := http.DefaultTransport.(*http.Transport).Clone()
-	transport.ResponseHeaderTimeout = 20 * time.Second
-	transport.MaxIdleConns = 16
-	transport.MaxIdleConnsPerHost = 8
-	return NewWithTransport(transport, version)
+	return NewWithOptions(Options{Version: version})
 }
 
 func (c *Client) codexVersion() string {
@@ -76,11 +81,44 @@ func NewWithTransport(transport http.RoundTripper, version ...func() string) *Cl
 	if transport == nil {
 		transport = http.DefaultTransport
 	}
-	client := &Client{http: &http.Client{Transport: &proxyTransport{base: transport}, CheckRedirect: func(r *http.Request, via []*http.Request) error { return http.ErrUseLastResponse }}, tokenURL: "https://auth.openai.com/oauth/token", baseURL: "https://chatgpt.com/backend-api/codex", registry: builtin.Registry()}
+	opts := Options{Transport: transport}
 	if len(version) > 0 {
-		client.version = version[0]
+		opts.Version = version[0]
 	}
-	return client
+	return NewWithOptions(opts)
+}
+
+func NewWithOptions(opts Options) *Client {
+	transport := opts.Transport
+	if transport == nil {
+		base := http.DefaultTransport.(*http.Transport).Clone()
+		base.ResponseHeaderTimeout = 20 * time.Second
+		base.MaxIdleConns = 16
+		base.MaxIdleConnsPerHost = 8
+		transport = base
+	}
+	return &Client{
+		http: &http.Client{
+			Transport:     &proxyTransport{base: transport},
+			CheckRedirect: func(r *http.Request, via []*http.Request) error { return http.ErrUseLastResponse },
+		},
+		tokenURL:       "https://auth.openai.com/oauth/token",
+		baseURL:        "https://chatgpt.com/backend-api/codex",
+		registry:       builtin.Registry(),
+		version:        opts.Version,
+		maxRequestBody: requestBodyLimit(opts.MaxRequestBody),
+	}
+}
+
+func (c *Client) MaxRequestBody() int64 {
+	return requestBodyLimit(c.maxRequestBody)
+}
+
+func requestBodyLimit(limits ...int64) int64 {
+	if len(limits) > 0 && limits[0] > 0 {
+		return limits[0]
+	}
+	return DefaultMaxRequestBody
 }
 
 func (c *Client) AuthorizationURL(state, challenge string) string {
@@ -250,7 +288,7 @@ func (c *Client) Chat(ctx context.Context, credential accounts.Credential, raw [
 func (c *Client) execute(ctx context.Context, credential accounts.Credential, raw []byte, headers http.Header, format translator.Format, compact bool) (*Stream, error) {
 	ctx = credentialContext(ctx, credential)
 	var input map[string]json.RawMessage
-	if len(raw) > MaxBody || json.Unmarshal(raw, &input) != nil || input == nil {
+	if int64(len(raw)) > c.MaxRequestBody() || json.Unmarshal(raw, &input) != nil || input == nil {
 		return nil, ErrInput
 	}
 	var model, previous string
@@ -285,7 +323,8 @@ func (c *Client) execute(ctx context.Context, credential accounts.Credential, ra
 		delete(body, "store")
 	}
 	encoded, err := json.Marshal(body)
-	if err != nil || len(encoded) > MaxBody {
+	// Translation can expand the body beyond the limit already checked at ingress.
+	if err != nil || int64(len(encoded)) > c.MaxRequestBody() {
 		return nil, ErrInput
 	}
 	opts := exec.Options{Stream: !compact, SourceFormat: translator.FormatOpenAIResponse, ResponseFormat: translator.FormatOpenAIResponse}

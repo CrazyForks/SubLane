@@ -95,6 +95,10 @@ func (s *Service) Acquire() (func(), error) {
 	}
 }
 
+func (s *Service) MaxRequestBody() int64 {
+	return s.provider.MaxRequestBody()
+}
+
 func (s *Service) Open(ctx context.Context, userID, groupID int64, raw []byte, headers http.Header, kind Kind) (exchange *Exchange, failure error) {
 	entry, err := s.begin(ctx, userID, groupID, kind)
 	if err != nil {
@@ -106,13 +110,16 @@ func (s *Service) Open(ctx context.Context, userID, groupID int64, raw []byte, h
 			entry.fail(failure)
 		}
 	}()
+	if int64(len(raw)) > s.MaxRequestBody() {
+		return nil, upstream.ErrInput
+	}
 	if kind == Messages {
-		if err := upstream.ValidateMessages(raw); err != nil {
+		if err := upstream.ValidateMessages(raw, s.MaxRequestBody()); err != nil {
 			return nil, err
 		}
 	}
 	if kind.IsGemini() {
-		if err := upstream.ValidateGemini(raw); err != nil {
+		if err := upstream.ValidateGemini(raw, s.MaxRequestBody()); err != nil {
 			return nil, err
 		}
 	}

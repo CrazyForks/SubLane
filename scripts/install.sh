@@ -214,7 +214,7 @@ CONFIG
         proxy_buffering off;
         proxy_read_timeout 650s;
         proxy_send_timeout 650s;
-        client_max_body_size 8m;
+        client_max_body_size 128m;
     }
 
     location /api/settings/backup/ {
@@ -244,6 +244,7 @@ SUBLANE_PORT=$install_port
 SUBLANE_PUBLIC_URL=$install_public_url
 SUBLANE_TRUSTED_PROXIES=$install_trusted_proxies
 SUBLANE_LOG_LEVEL=info
+SUBLANE_MAX_REQUEST_BODY_MB=128
 ENV
 }
 
@@ -254,6 +255,7 @@ write_binary_files() {
     printf 'SUBLANE_PUBLIC_URL=%q\n' "$install_public_url"
     printf 'SUBLANE_TRUSTED_PROXIES=%q\n' "$install_trusted_proxies"
     printf 'SUBLANE_LOG_LEVEL=info\n'
+    printf 'SUBLANE_MAX_REQUEST_BODY_MB=128\n'
   } > "$install_stage/sublane.env"
   cat > "$install_stage/start.sh" <<'RUN'
 #!/usr/bin/env bash

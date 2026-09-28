@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"log/slog"
+	"math"
 	"net"
 	"net/netip"
 	"net/url"
@@ -15,6 +16,7 @@ type Config struct {
 	Addr            string
 	DataDir         string
 	LogLevel        slog.Level
+	MaxRequestBody  int64
 	PublicURL       string
 	TrustedProxies  []netip.Prefix
 	PricingURL      string
@@ -26,7 +28,7 @@ type Config struct {
 }
 
 func Load(getenv func(string) string) (Config, error) {
-	c := Config{Addr: "127.0.0.1:8080", DataDir: "./data", LogLevel: slog.LevelInfo, PricingInterval: 6 * time.Hour}
+	c := Config{Addr: "127.0.0.1:8080", DataDir: "./data", LogLevel: slog.LevelInfo, MaxRequestBody: 128 << 20, PricingInterval: 6 * time.Hour}
 	if v := getenv("SUBLANE_ADDR"); v != "" {
 		c.Addr = v
 	}
@@ -37,6 +39,13 @@ func Load(getenv func(string) string) (Config, error) {
 		if err := c.LogLevel.UnmarshalText([]byte(v)); err != nil {
 			return c, fmt.Errorf("SUBLANE_LOG_LEVEL: %w", err)
 		}
+	}
+	if v := getenv("SUBLANE_MAX_REQUEST_BODY_MB"); v != "" {
+		mb, err := strconv.ParseInt(v, 10, 64)
+		if err != nil || mb <= 0 || mb > math.MaxInt64>>20 {
+			return c, fmt.Errorf("SUBLANE_MAX_REQUEST_BODY_MB must be a positive integer fitting in bytes")
+		}
+		c.MaxRequestBody = mb << 20
 	}
 	if v := getenv("SUBLANE_PUBLIC_URL"); v != "" {
 		u, err := url.Parse(v)

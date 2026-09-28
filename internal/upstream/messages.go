@@ -11,7 +11,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/translator"
 )
 
-func ValidateMessages(raw []byte) error {
+func ValidateMessages(raw []byte, maxRequestBody ...int64) error {
 	var request struct {
 		Model     string `json:"model"`
 		MaxTokens int64  `json:"max_tokens"`
@@ -21,7 +21,7 @@ func ValidateMessages(raw []byte) error {
 			Content json.RawMessage `json:"content"`
 		} `json:"messages"`
 	}
-	if len(raw) > MaxBody || json.Unmarshal(raw, &request) != nil || request.Model == "" || request.MaxTokens <= 0 || len(request.Messages) == 0 {
+	if int64(len(raw)) > requestBodyLimit(maxRequestBody...) || json.Unmarshal(raw, &request) != nil || request.Model == "" || request.MaxTokens <= 0 || len(request.Messages) == 0 {
 		return ErrInput
 	}
 	for _, message := range request.Messages {
@@ -47,7 +47,7 @@ func ValidateMessages(raw []byte) error {
 }
 
 func (c *Client) Messages(ctx context.Context, credential accounts.Credential, raw []byte, headers http.Header) (*Stream, error) {
-	if err := ValidateMessages(raw); err != nil {
+	if err := ValidateMessages(raw, c.MaxRequestBody()); err != nil {
 		return nil, err
 	}
 	var input struct {
