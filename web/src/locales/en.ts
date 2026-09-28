@@ -375,7 +375,21 @@ export const en = {
   ccSwitchImport: 'Import into CC Switch',
   ccSwitchImportNamed: 'Import {{name}} into CC Switch',
   ccSwitchDescription:
-    'Prepare a Codex connection using this API key, then confirm the import in CC Switch.',
+    'Choose a client and model for this API key, then confirm the import in CC Switch.',
+  ccSwitchClient: 'Client',
+  ccSwitchApp_codex: 'Codex',
+  ccSwitchApp_opencode: 'OpenCode',
+  ccSwitchApp_claude: 'Claude Code',
+  ccSwitchApp_openclaw: 'OpenClaw',
+  ccSwitchApp_hermes: 'Hermes',
+  ccSwitchApp_gemini: 'Gemini CLI',
+  ccSwitchApp_grokbuild: 'Grok Build',
+  ccSwitchClaudeHint:
+    'Haiku, Sonnet, and Opus will all use the selected pool model.',
+  ccSwitchGeminiHint:
+    'Gemini CLI uses API key authentication. Token counting and native Gemini model discovery are not available; test a conversation after import.',
+  ccSwitchGrokHint:
+    'After import, check that the context window in CC Switch matches the selected model.',
   ccSwitchName: 'Configuration name',
   ccSwitchModelHint:
     'Enter an exact model ID allowed by this key’s pool. Use the provider prefix when required.',
@@ -664,9 +678,12 @@ export const en = {
     'Create a personal key for a ready account pool before your first request.',
   clientGuideTitle: 'Connect your client',
   clientGuideDescription:
-    'Choose the API format your client supports and connect with a personal SubLane API key.',
+    'Choose your client or API format and connect with a personal SubLane API key.',
   clientProtocol: 'Client protocol',
   clientProtocolCodex: 'Codex (Responses)',
+  clientProtocolOpenAI: 'Cline / OpenAI compatible',
+  clientClineInstructions:
+    'In Cline settings, select OpenAI Compatible. Enter the API base URL and model ID below, then paste your personal SubLane key into API Key. If Plan and Act use separate configurations, configure both.',
   clientProtocolClaude: 'Claude Messages',
   clientProtocolGemini: 'Gemini API',
   clientRequestExample: 'Request example',

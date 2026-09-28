@@ -1,4 +1,4 @@
-export const clientProtocols = ['codex', 'claude', 'gemini'] as const
+export const clientProtocols = ['codex', 'openai', 'claude', 'gemini'] as const
 export type ClientProtocol = (typeof clientProtocols)[number]
 
 // Model IDs are user input. Quote the complete JSON/URL argument before copying a shell command.
@@ -9,7 +9,8 @@ export function clientConfiguration(
   origin: string,
   model: string,
 ) {
-  const baseURL = protocol === 'codex' ? `${origin}/v1` : origin
+  const baseURL =
+    protocol === 'codex' || protocol === 'openai' ? `${origin}/v1` : origin
   const selectedModel = model.trim()
   if (protocol === 'codex') {
     return {
@@ -21,21 +22,27 @@ export function clientConfiguration(
   const url =
     protocol === 'claude'
       ? `${origin}/v1/messages`
-      : `${origin}/v1beta/models/${encodeURIComponent(id)}:generateContent`
+      : protocol === 'openai'
+        ? `${baseURL}/chat/completions`
+        : `${origin}/v1beta/models/${encodeURIComponent(id)}:generateContent`
   const body =
-    protocol === 'claude'
+    protocol !== 'gemini'
       ? {
           model: id,
-          max_tokens: 1024,
+          ...(protocol === 'claude' ? { max_tokens: 1024 } : {}),
           messages: [{ role: 'user', content: 'Hello' }],
         }
       : { contents: [{ role: 'user', parts: [{ text: 'Hello' }] }] }
-  const header = protocol === 'claude' ? 'x-api-key' : 'x-goog-api-key'
+  const authorization = {
+    claude: 'x-api-key: $SUBLANE_API_KEY',
+    gemini: 'x-goog-api-key: $SUBLANE_API_KEY',
+    openai: 'Authorization: Bearer $SUBLANE_API_KEY',
+  }[protocol]
   return {
     baseURL,
     configuration: [
       `curl ${shellLiteral(url)}`,
-      `  -H "${header}: $SUBLANE_API_KEY"`,
+      `  -H "${authorization}"`,
       ...(protocol === 'claude'
         ? ["  -H 'anthropic-version: 2023-06-01'"]
         : []),

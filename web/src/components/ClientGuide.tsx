@@ -91,6 +91,7 @@ function GuideContent({
   const copied = copiedConfiguration === configuration
   const protocolLabels = {
     codex: 'clientProtocolCodex',
+    openai: 'clientProtocolOpenAI',
     claude: 'clientProtocolClaude',
     gemini: 'clientProtocolGemini',
   } as const
@@ -180,6 +181,11 @@ function GuideContent({
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
+      {protocol === 'openai' && (
+        <p className="text-sm leading-6 text-muted-foreground">
+          {t('clientClineInstructions')}
+        </p>
+      )}
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="space-y-2">
           <label htmlFor="client-endpoint" className="text-sm font-medium">

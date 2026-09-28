@@ -1,5 +1,17 @@
 import { z } from 'zod'
 
+export const ccSwitchApps = [
+  'codex',
+  'opencode',
+  'claude',
+  'openclaw',
+  'hermes',
+  'gemini',
+  'grokbuild',
+] as const
+const appSchema = z.enum(ccSwitchApps)
+export type ImportApp = z.infer<typeof appSchema>
+
 function isOrigin(value: string) {
   try {
     const url = new URL(value)
@@ -16,6 +28,7 @@ function isOrigin(value: string) {
   }
 }
 const settingsSchema = z.object({
+  app: appSchema.default('codex'),
   origin: z
     .string()
     .refine(isOrigin)
@@ -49,20 +62,30 @@ export function validImportSettings(input: ImportSettings) {
   return settingsSchema.safeParse(input).success
 }
 
-// V1 provider parameters are consumed by CC Switch's Codex importer, which builds Responses/auth-file settings.
+export function ccSwitchEndpoint(origin: string, app: ImportApp) {
+  // Native clients append /v1/messages or /v1beta themselves; OpenAI clients need the /v1 base.
+  return app === 'claude' || app === 'gemini' ? origin : `${origin}/v1`
+}
+
 export function ccSwitchLink(input: ImportSettings & { secret: string }) {
   const settings = settingsSchema.parse(input)
   const secret = secretSchema.parse(input.secret)
   const params = new URLSearchParams({
     resource: 'provider',
-    app: 'codex',
+    app: settings.app,
     name: settings.name,
-    endpoint: `${settings.origin}/v1`,
+    endpoint: ccSwitchEndpoint(settings.origin, settings.app),
     apiKey: secret,
     model: settings.model,
     homepage: settings.origin,
     enabled: 'false',
   })
+  if (settings.app === 'claude') {
+    // Keep Claude's built-in aliases inside this key's allowed model catalog.
+    for (const alias of ['haikuModel', 'sonnetModel', 'opusModel']) {
+      params.set(alias, settings.model)
+    }
+  }
   return `ccswitch://v1/import?${params.toString()}`
 }
 
@@ -73,7 +96,7 @@ export function openCCSwitch(link: string) {
     url.host !== 'v1' ||
     url.pathname !== '/import' ||
     url.searchParams.get('resource') !== 'provider' ||
-    url.searchParams.get('app') !== 'codex'
+    !appSchema.safeParse(url.searchParams.get('app')).success
   ) {
     throw new Error('invalid_cc_switch_link')
   }

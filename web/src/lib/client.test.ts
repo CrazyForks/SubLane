@@ -11,7 +11,7 @@ import { join } from 'node:path'
 import { expect, it } from 'vitest'
 import { clientConfiguration } from './client'
 
-it.each(['claude', 'gemini'] as const)(
+it.each(['claude', 'gemini', 'openai'] as const)(
   'copies a safe %s request without executing model text',
   (protocol) => {
     const directory = mkdtempSync(join(tmpdir(), 'sublane-client-'))
@@ -46,12 +46,21 @@ it.each(['claude', 'gemini'] as const)(
         expect(body.model).toBe(model)
         expect(args).toContain('https://gateway.example.test/v1/messages')
         expect(args).toContain('x-api-key: synthetic-key')
-      } else {
+      } else if (protocol === 'gemini') {
         expect(args).toContain(
           `https://gateway.example.test/v1beta/models/${encodeURIComponent(model)}:generateContent`,
         )
         expect(body.contents[0].parts[0].text).toBe('Hello')
         expect(args).toContain('x-goog-api-key: synthetic-key')
+      } else {
+        expect(args).toContain(
+          'https://gateway.example.test/v1/chat/completions',
+        )
+        expect(args).toContain('Authorization: Bearer synthetic-key')
+        expect(body).toEqual({
+          model,
+          messages: [{ role: 'user', content: 'Hello' }],
+        })
       }
     } finally {
       rmSync(directory, { recursive: true, force: true })
@@ -75,4 +84,14 @@ it('keeps Codex configuration and distinguishes native base URLs', () => {
     clientConfiguration('gemini', 'https://gateway.example.test', '')
       .configuration,
   ).toContain('YOUR_MODEL_ID')
+})
+
+it('uses the OpenAI base URL and a model placeholder for Cline setup', () => {
+  const result = clientConfiguration(
+    'openai',
+    'https://gateway.example.test',
+    '  ',
+  )
+  expect(result.baseURL).toBe('https://gateway.example.test/v1')
+  expect(result.configuration).toContain('YOUR_MODEL_ID')
 })
