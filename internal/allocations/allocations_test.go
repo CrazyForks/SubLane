@@ -429,6 +429,19 @@ func TestWorkspaceOwnerCanReceiveAllowanceWithoutPoolGrant(t *testing.T) {
 	if _, err := Authorize(ctx, db.New(conn), scheme.ID, 1, scheme.GroupID, scheme.EffectiveAt); err != nil {
 		t.Fatalf("owner could not use the assigned allowance: %v", err)
 	}
+	for _, userID := range []int64{0, 1} {
+		detail, err := service.Detail(ctx, scheme.ID, userID)
+		if err != nil || !detail.Available || len(detail.Balances) != 1 {
+			t.Fatalf("owner allowance detail for user %d: %+v, %v", userID, detail, err)
+		}
+		if balance := detail.Balances[0]; balance.UserID != 1 || balance.Username != "synthetic-admin" || balance.Limit != 100 {
+			t.Fatalf("incorrect owner balance: %+v", balance)
+		}
+	}
+	own, err := service.Own(ctx, 1)
+	if err != nil || len(own) != 1 || own[0].ID != scheme.ID {
+		t.Fatalf("owner allowance discovery: %+v, %v", own, err)
+	}
 }
 
 func TestPlatformOwnerCanReceiveAllowanceAsMemberOfAnotherWorkspace(t *testing.T) {
@@ -453,10 +466,18 @@ func TestPlatformOwnerCanReceiveAllowanceAsMemberOfAnotherWorkspace(t *testing.T
 	if err := pools.SetMemberGroups(ctx, 1, []int64{pool.ID}); err != nil {
 		t.Fatal(err)
 	}
-	scheme, err := NewForTenant(conn, workspace.ID).SaveScheme(ctx, 0, SchemeInput{Name: "Synthetic allowance", GroupID: pool.ID, Enabled: true,
+	service := NewForTenant(conn, workspace.ID)
+	scheme, err := service.SaveScheme(ctx, 0, SchemeInput{Name: "Synthetic allowance", GroupID: pool.ID, Enabled: true,
 		Config: Config{Mode: "tokens", Period: "day", Members: []Share{{UserID: 1, Limit: 100}}}})
 	if err != nil || len(scheme.Config.Members) != 1 || scheme.Config.Members[0].UserID != 1 {
 		t.Fatalf("workspace member 1 could not receive allowance: %+v, %v", scheme, err)
+	}
+	own, err := service.Own(ctx, 1)
+	if err != nil || len(own) != 1 || !own[0].Available || len(own[0].Balances) != 1 {
+		t.Fatalf("platform owner's workspace allowance: %+v, %v", own, err)
+	}
+	if balance := own[0].Balances[0]; balance.UserID != 1 || balance.Username != "synthetic-admin" || balance.Limit != 100 {
+		t.Fatalf("incorrect platform owner balance: %+v", balance)
 	}
 }
 

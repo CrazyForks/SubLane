@@ -85,7 +85,8 @@ func (s *Service) Detail(ctx context.Context, id, user int64) (Detail, error) {
 		if user > 0 && m.UserID != user {
 			continue
 		}
-		member, err := q.GetMember(ctx, m.UserID)
+		// Allowance recipients include workspace owners and admins; the legacy global member query excludes platform owners.
+		member, err := q.GetTenantMember(ctx, db.GetTenantMemberParams{TenantID: s.tenantID, UserID: m.UserID})
 		if err != nil {
 			return out, err
 		}
