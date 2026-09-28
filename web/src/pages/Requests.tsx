@@ -13,6 +13,7 @@ import {
   outcomeKeys,
   outcomes,
   cacheHitRate,
+  formatRequestCost,
   type RequestFilters,
   type RequestRecord,
 } from '@/lib/requests'
@@ -256,12 +257,13 @@ function RequestTable({
                     'requestResult',
                     'requestDuration',
                     'requestTokens',
+                    'requestEstimatedCost',
                   ] as const
                 ).map((label) => (
                   <th
                     key={label}
                     scope="col"
-                    className="whitespace-nowrap px-4 py-3 font-medium"
+                    className={`whitespace-nowrap px-4 py-3 font-medium ${label === 'requestEstimatedCost' ? 'text-right' : ''}`}
                   >
                     {t(label)}
                   </th>
@@ -392,6 +394,15 @@ function RequestTable({
                         })}
                       </span>
                     </p>
+                  </td>
+                  <td
+                    className="whitespace-nowrap px-4 py-4 text-right tabular-nums"
+                    title={t('requestEstimatedCostHint')}
+                  >
+                    {formatRequestCost(
+                      item.estimated_cost_micro_usd,
+                      i18n.resolvedLanguage ?? 'en',
+                    )}
                   </td>
                 </tr>
               ))}

@@ -941,6 +941,9 @@ export const zh: Record<keyof typeof en, string> = {
   requestResult: '结果',
   requestDuration: '耗时',
   requestTokens: 'Token（输入 / 输出）',
+  requestEstimatedCost: '估算金额（USD）',
+  requestEstimatedCostHint:
+    '按已上报 Token 和当前模型价格估算，缓存输入按缓存价计算。仅供参考，不代表实际账单或分配额度扣款；用量或价格缺失时显示 —。',
   requestCachedTokens: '缓存：{{count}}',
   requestCacheHitRate: '命中率：{{rate}}',
   requestCacheHitRateHint:

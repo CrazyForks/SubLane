@@ -5,34 +5,36 @@ import (
 	"time"
 
 	"github.com/murongg/SubLane/internal/accounts"
+	"github.com/murongg/SubLane/internal/allocations"
 	"github.com/murongg/SubLane/internal/storage/db"
 )
 
 type RequestRecord struct {
-	ID              int64  `json:"id"`
-	UserID          int64  `json:"user_id"`
-	KeyID           int64  `json:"key_id"`
-	GroupID         int64  `json:"group_id"`
-	AccountID       string `json:"account_id"`
-	Provider        string `json:"provider"`
-	Model           string `json:"model"`
-	Transport       string `json:"transport"`
-	Operation       string `json:"operation"`
-	StartedAt       int64  `json:"started_at"`
-	DurationMs      int64  `json:"duration_ms"`
-	Outcome         string `json:"outcome"`
-	ErrorCode       string `json:"error_code"`
-	UpstreamStatus  *int64 `json:"upstream_status"`
-	InputTokens     *int64 `json:"input_tokens"`
-	OutputTokens    *int64 `json:"output_tokens"`
-	CachedTokens    *int64 `json:"cached_tokens"`
-	RequestID       string `json:"request_id"`
-	FirstTokenMs    *int64 `json:"first_token_ms"`
-	ReasoningEffort string `json:"reasoning_effort"`
-	Username        string `json:"username"`
-	KeyName         string `json:"key_name"`
-	GroupName       string `json:"group_name"`
-	AccountName     string `json:"account_name"`
+	ID                    int64  `json:"id"`
+	UserID                int64  `json:"user_id"`
+	KeyID                 int64  `json:"key_id"`
+	GroupID               int64  `json:"group_id"`
+	AccountID             string `json:"account_id"`
+	Provider              string `json:"provider"`
+	Model                 string `json:"model"`
+	Transport             string `json:"transport"`
+	Operation             string `json:"operation"`
+	StartedAt             int64  `json:"started_at"`
+	DurationMs            int64  `json:"duration_ms"`
+	Outcome               string `json:"outcome"`
+	ErrorCode             string `json:"error_code"`
+	UpstreamStatus        *int64 `json:"upstream_status"`
+	InputTokens           *int64 `json:"input_tokens"`
+	OutputTokens          *int64 `json:"output_tokens"`
+	CachedTokens          *int64 `json:"cached_tokens"`
+	RequestID             string `json:"request_id"`
+	FirstTokenMs          *int64 `json:"first_token_ms"`
+	ReasoningEffort       string `json:"reasoning_effort"`
+	Username              string `json:"username"`
+	KeyName               string `json:"key_name"`
+	GroupName             string `json:"group_name"`
+	AccountName           string `json:"account_name"`
+	EstimatedCostMicroUSD *int64 `json:"estimated_cost_micro_usd"`
 }
 type RequestPage struct {
 	Requests   []RequestRecord `json:"requests"`
@@ -73,7 +75,17 @@ func (s *Service) requests(ctx context.Context, userID int64, f RequestFilter) (
 		return page, err
 	}
 	for _, row := range rows {
-		record := RequestRecord(row)
+		record := RequestRecord{
+			ID: row.ID, UserID: row.UserID, KeyID: row.KeyID, GroupID: row.GroupID,
+			AccountID: row.AccountID, Provider: row.Provider, Model: row.Model,
+			Transport: row.Transport, Operation: row.Operation, StartedAt: row.StartedAt,
+			DurationMs: row.DurationMs, Outcome: row.Outcome, ErrorCode: row.ErrorCode,
+			UpstreamStatus: row.UpstreamStatus, InputTokens: row.InputTokens,
+			OutputTokens: row.OutputTokens, CachedTokens: row.CachedTokens,
+			RequestID: row.RequestID, FirstTokenMs: row.FirstTokenMs, ReasoningEffort: row.ReasoningEffort,
+			Username: row.Username, KeyName: row.KeyName, GroupName: row.GroupName, AccountName: row.AccountName,
+			EstimatedCostMicroUSD: s.estimatedCost(row),
+		}
 		if userID != 0 {
 			record.AccountID, record.AccountName = "", ""
 		}
@@ -84,6 +96,29 @@ func (s *Service) requests(ctx context.Context, userID int64, f RequestFilter) (
 		page.NextCursor = page.Requests[49].ID
 	}
 	return page, nil
+}
+
+func (s *Service) estimatedCost(row db.ListRequestsRow) *int64 {
+	if s.pricing == nil || row.InputTokens == nil || row.OutputTokens == nil {
+		return nil
+	}
+	price, ok := s.pricing.Lookup(row.Model)
+	if !ok {
+		return nil
+	}
+	var cached int64
+	if row.CachedTokens != nil {
+		cached = *row.CachedTokens
+	} else if *row.InputTokens != 0 && price.Input != price.Cached {
+		// An unknown cache split cannot be treated as full-price input when rates differ.
+		return nil
+	}
+	// This is a current-catalog estimate; allowance debits use their saved revision prices.
+	cost, err := allocations.Cost(allocations.Rate{Input: price.Input, Cached: price.Cached, Output: price.Output}, *row.InputTokens, *row.OutputTokens, cached)
+	if err != nil {
+		return nil
+	}
+	return &cost
 }
 
 type RequestCaller struct {
