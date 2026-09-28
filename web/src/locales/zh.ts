@@ -482,8 +482,8 @@ export const zh: Record<keyof typeof en, string> = {
   memberLimitsDescription:
     '该成员的所有 API 密钥和账号池共用这些限制，修改对新的模型请求生效。',
   memberLimitsHint:
-    '0 表示不限。每分钟请求数为 0–6,000，并发为 0–8；已开始的调用会继续执行。',
-  memberLimitsInvalid: '请输入整数：每分钟请求数为 0–6,000，并发为 0–8。',
+    '0 表示不限。每分钟请求数为 0–6,000，并发为 0–10（默认 10）；已开始的调用会继续执行。',
+  memberLimitsInvalid: '请输入整数：每分钟请求数为 0–6,000，并发为 0–10。',
   memberLimitsFailed: '无法读取或保存请求限制，请重试。',
   loadingMemberLimits: '正在读取请求限制…',
   requestsPerMinute: '每分钟请求数',

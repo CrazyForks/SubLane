@@ -5,8 +5,9 @@ WHERE m.tenant_id=sqlc.arg(tenant_id) AND m.user_id=sqlc.arg(user_id)
 AND m.enabled=1 AND t.status='active';
 
 -- name: SetMemberLimits :execrows
+-- Limits apply to every workspace role, including the owner's own membership.
 UPDATE memberships SET requests_per_minute=sqlc.arg(requests_per_minute),max_concurrency=sqlc.arg(max_concurrency)
-WHERE tenant_id=sqlc.arg(tenant_id) AND user_id=sqlc.arg(user_id) AND role='member';
+WHERE tenant_id=sqlc.arg(tenant_id) AND user_id=sqlc.arg(user_id);
 
 -- name: GetMemberWindow :one
 SELECT window_start,requests FROM member_rate

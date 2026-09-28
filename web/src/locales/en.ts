@@ -526,9 +526,9 @@ export const en = {
   memberLimitsDescription:
     'All API keys and pools used by this member share these limits. Changes apply to new model requests.',
   memberLimitsHint:
-    '0 means unlimited. Requests per minute: 0–6,000; concurrency: 0–8. Active calls are allowed to finish.',
+    '0 means unlimited. Requests per minute: 0–6,000; concurrency: 0–10 (default: 10). Active calls are allowed to finish.',
   memberLimitsInvalid:
-    'Enter whole numbers: 0–6,000 requests per minute and 0–8 concurrent requests.',
+    'Enter whole numbers: 0–6,000 requests per minute and 0–10 concurrent requests.',
   memberLimitsFailed:
     'Could not load or save request limits. Please try again.',
   loadingMemberLimits: 'Loading request limits…',

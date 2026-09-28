@@ -37,12 +37,10 @@ export function MemberActions({
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
-          {member.role === 'member' && (
-            <DropdownMenuItem onSelect={() => setAction('limits')}>
-              <Gauge aria-hidden="true" />
-              {t('memberLimits')}
-            </DropdownMenuItem>
-          )}
+          <DropdownMenuItem onSelect={() => setAction('limits')}>
+            <Gauge aria-hidden="true" />
+            {t('memberLimits')}
+          </DropdownMenuItem>
           {onPasswordReset && (
             <DropdownMenuItem onSelect={() => setAction('password')}>
               <KeyRound aria-hidden="true" />
