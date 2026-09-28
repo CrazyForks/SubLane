@@ -16,102 +16,180 @@ const syntheticMember = {
 const response = (data: unknown, status = 200) =>
   new Response(JSON.stringify(data), { status })
 
-it('shows the workspace owner without member-only management controls', async () => {
-  const fetchMock = vi.fn().mockImplementation((url: string) => {
-    if (url === '/api/auth/state')
-      return Promise.resolve(response(authenticated))
-    return Promise.resolve(
-      response({
-        members: [
-          {
-            id: 1,
-            username: 'synthetic-owner',
-            role: 'owner',
-            enabled: true,
-            created_at: 1900000000,
-          },
-        ],
-        next_cursor: 0,
-      }),
-    )
-  })
+it('lets the workspace owner edit their own request limits', async () => {
+  const policy = {
+    user_id: 1,
+    requests_per_minute: 0,
+    max_concurrency: 10,
+    in_flight: 0,
+    requests_this_minute: 0,
+    reset_at: 1900000000,
+  }
+  const fetchMock = vi
+    .fn()
+    .mockImplementation((url: string, init?: RequestInit) => {
+      if (url === '/api/auth/state')
+        return Promise.resolve(response(authenticated))
+      if (url === '/api/members/1/limits') {
+        if (init?.method === 'PATCH')
+          Object.assign(policy, JSON.parse(String(init.body)))
+        return Promise.resolve(response(policy))
+      }
+      return Promise.resolve(
+        response({
+          members: [
+            {
+              id: 1,
+              username: 'synthetic-owner',
+              role: 'owner',
+              enabled: true,
+              created_at: 1900000000,
+            },
+          ],
+          next_cursor: 0,
+        }),
+      )
+    })
   vi.stubGlobal('fetch', fetchMock)
   open()
   const row = await screen.findByRole('row', { name: /synthetic-owner/ })
   expect(within(row).getByText('Owner')).toBeTruthy()
   expect(within(row).queryByRole('button', { name: /disable/i })).toBeNull()
   expect(within(row).queryByRole('button', { name: /change role/i })).toBeNull()
+  const user = userEvent.setup()
+  await user.click(within(row).getByRole('button', { name: /more actions/i }))
+  expect(screen.queryByRole('menuitem', { name: 'Reset password' })).toBeNull()
+  await user.click(screen.getByRole('menuitem', { name: 'Request limits' }))
+  const limits = await screen.findByRole('dialog', {
+    name: 'Request limits for synthetic-owner',
+  })
+  const concurrency = await within(limits).findByLabelText(
+    'Concurrent requests',
+  )
+  await user.clear(concurrency)
+  await user.type(concurrency, '5')
+  await user.click(within(limits).getByRole('button', { name: 'Save changes' }))
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
   expect(
-    within(row).queryByRole('button', { name: /more actions/i }),
-  ).toBeNull()
+    fetchMock.mock.calls.some(
+      ([url, init]) =>
+        url === '/api/members/1/limits' &&
+        init?.method === 'PATCH' &&
+        JSON.parse(String(init.body)).max_concurrency === 5,
+    ),
+  ).toBe(true)
 })
 
-it('updates shared member limits and resets a member password', async () => {
-  const policy = {
-    user_id: 2,
-    requests_per_minute: 0,
-    max_concurrency: 0,
-    in_flight: 0,
-    requests_this_minute: 0,
-    reset_at: 1900000000,
-  }
-  const fetch = vi
-    .fn()
-    .mockImplementation((url: string, init?: RequestInit) => {
-      if (url === '/api/auth/state')
-        return Promise.resolve(response(authenticated))
-      if (url.endsWith('/limits')) return Promise.resolve(response(policy))
-      if (url.endsWith('/password') && init?.method === 'POST')
-        return Promise.resolve(new Response(null, { status: 204 }))
-      return Promise.resolve(
-        response({ members: [syntheticMember], next_cursor: 0 }),
-      )
-    })
-  vi.stubGlobal('fetch', fetch)
-  const user = userEvent.setup()
+it('offers request limits for workspace administrators', async () => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn().mockImplementation((url: string) =>
+      Promise.resolve(
+        response(
+          url === '/api/auth/state'
+            ? authenticated
+            : {
+                members: [{ ...syntheticMember, role: 'admin' }],
+                next_cursor: 0,
+              },
+        ),
+      ),
+    ),
+  )
   open()
+  const user = userEvent.setup()
   await user.click(
     await screen.findByRole('button', { name: 'More actions for member-test' }),
   )
-  await user.click(screen.getByRole('menuitem', { name: 'Request limits' }))
-  const limits = await screen.findByRole('dialog', {
-    name: 'Request limits for member-test',
-  })
-  const rate = await within(limits).findByLabelText('Requests per minute')
-  await user.clear(rate)
-  await user.type(rate, '60')
-  const concurrency = within(limits).getByLabelText('Concurrent requests')
-  await user.clear(concurrency)
-  await user.type(concurrency, '2')
-  await user.click(within(limits).getByRole('button', { name: 'Save changes' }))
-  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
-  const call = fetch.mock.calls.find(
-    ([url, init]) => url.endsWith('/limits') && init?.method === 'PATCH',
-  )
-  expect(JSON.parse(String(call?.[1]?.body))).toEqual({
-    requests_per_minute: 60,
-    max_concurrency: 2,
-  })
-  await user.click(
-    screen.getByRole('button', { name: 'More actions for member-test' }),
-  )
-  await user.click(screen.getByRole('menuitem', { name: 'Reset password' }))
-  const reset = await screen.findByRole('dialog', {
-    name: 'Reset password for member-test',
-  })
-  expect(within(reset).queryByLabelText('Current password')).toBeNull()
-  await user.type(
-    within(reset).getByLabelText('New password'),
-    'synthetic-reset',
-  )
-  await user.type(
-    within(reset).getByLabelText('Confirm password'),
-    'synthetic-reset',
-  )
-  await user.click(within(reset).getByRole('button', { name: 'Save password' }))
-  await screen.findByText('Password reset for member-test.')
-  expect(screen.queryByDisplayValue('synthetic-reset')).toBeNull()
+  expect(screen.getByRole('menuitem', { name: 'Request limits' })).toBeTruthy()
 })
+
+it.each([0, 10])(
+  'updates shared member concurrency to %i and resets a member password',
+  async (maxConcurrency) => {
+    const policy = {
+      user_id: 2,
+      requests_per_minute: 0,
+      max_concurrency: 10,
+      in_flight: 0,
+      requests_this_minute: 0,
+      reset_at: 1900000000,
+    }
+    const fetch = vi
+      .fn()
+      .mockImplementation((url: string, init?: RequestInit) => {
+        if (url === '/api/auth/state')
+          return Promise.resolve(response(authenticated))
+        if (url.endsWith('/limits')) return Promise.resolve(response(policy))
+        if (url.endsWith('/password') && init?.method === 'POST')
+          return Promise.resolve(new Response(null, { status: 204 }))
+        return Promise.resolve(
+          response({ members: [syntheticMember], next_cursor: 0 }),
+        )
+      })
+    vi.stubGlobal('fetch', fetch)
+    const user = userEvent.setup()
+    open()
+    await user.click(
+      await screen.findByRole('button', {
+        name: 'More actions for member-test',
+      }),
+    )
+    await user.click(screen.getByRole('menuitem', { name: 'Request limits' }))
+    const limits = await screen.findByRole('dialog', {
+      name: 'Request limits for member-test',
+    })
+    const rate = await within(limits).findByLabelText('Requests per minute')
+    await user.clear(rate)
+    await user.type(rate, '60')
+    const concurrency = within(limits).getByLabelText('Concurrent requests')
+    expect((concurrency as HTMLInputElement).value).toBe('10')
+    expect(concurrency.getAttribute('max')).toBe('10')
+    await user.clear(concurrency)
+    await user.type(concurrency, '11')
+    await user.click(
+      within(limits).getByRole('button', { name: 'Save changes' }),
+    )
+    expect(within(limits).getByRole('alert').textContent).toContain('0–10')
+    expect(fetch.mock.calls.some(([, init]) => init?.method === 'PATCH')).toBe(
+      false,
+    )
+    await user.clear(concurrency)
+    await user.type(concurrency, String(maxConcurrency))
+    await user.click(
+      within(limits).getByRole('button', { name: 'Save changes' }),
+    )
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    const call = fetch.mock.calls.find(
+      ([url, init]) => url.endsWith('/limits') && init?.method === 'PATCH',
+    )
+    expect(JSON.parse(String(call?.[1]?.body))).toEqual({
+      requests_per_minute: 60,
+      max_concurrency: maxConcurrency,
+    })
+    await user.click(
+      screen.getByRole('button', { name: 'More actions for member-test' }),
+    )
+    await user.click(screen.getByRole('menuitem', { name: 'Reset password' }))
+    const reset = await screen.findByRole('dialog', {
+      name: 'Reset password for member-test',
+    })
+    expect(within(reset).queryByLabelText('Current password')).toBeNull()
+    await user.type(
+      within(reset).getByLabelText('New password'),
+      'synthetic-reset',
+    )
+    await user.type(
+      within(reset).getByLabelText('Confirm password'),
+      'synthetic-reset',
+    )
+    await user.click(
+      within(reset).getByRole('button', { name: 'Save password' }),
+    )
+    await screen.findByText('Password reset for member-test.')
+    expect(screen.queryByDisplayValue('synthetic-reset')).toBeNull()
+  },
+)
 
 function open() {
   render(

@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"path/filepath"
@@ -204,5 +205,78 @@ func TestPlatformOwnerCanHaveOrdinaryMemberLimitsInAnotherWorkspace(t *testing.T
 	}
 	if result := request(h, http.MethodGet, path, "", nil, cookie); result.Code != http.StatusOK || !strings.Contains(result.Body.String(), `"requests_per_minute":10`) {
 		t.Fatalf("read member limits for global user 1: %d %s", result.Code, result.Body.String())
+	}
+}
+
+func TestWorkspaceOwnerCanSetLimitsForEveryRoleIncludingSelf(t *testing.T) {
+	ctx := context.Background()
+	connection, err := storage.Open(ctx, filepath.Join(t.TempDir(), "synthetic-limits.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connection.Close()
+	identity, err := auth.New(connection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := identity.Setup(ctx, "synthetic-platform-owner", "synthetic password", "Synthetic workspace"); err != nil {
+		t.Fatal(err)
+	}
+	owner, err := identity.CreateMember(ctx, "synthetic-workspace-owner", "synthetic password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	member, err := identity.CreateMember(ctx, "synthetic-workspace-member", "synthetic password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreign, err := identity.CreateMember(ctx, "synthetic-foreign-member", "synthetic password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tenancy := tenants.New(connection)
+	workspace, err := tenancy.Create(ctx, owner.ID, "Second workspace")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, target := range []struct {
+		id   int64
+		role tenants.Role
+	}{{1, tenants.RoleAdmin}, {member.ID, tenants.RoleMember}} {
+		if err := tenancy.AddMember(ctx, owner.ID, workspace.ID, target.id, target.role); err != nil {
+			t.Fatal(err)
+		}
+	}
+	forwarding := gateway.NewForTenant(ctx, connection, nil, nil, workspace.ID)
+	defer forwarding.Close()
+	h := New(Options{Auth: identity, Tenants: tenancy, TenantID: workspace.ID, Gateway: forwarding})
+	session, err := identity.Login(ctx, owner.Username, "synthetic password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cookie := &http.Cookie{Name: sessionCookie, Value: session.Token}
+	policy := map[string]int64{"requests_per_minute": 0, "max_concurrency": 5}
+	for _, id := range []int64{owner.ID, 1, member.ID} {
+		path := fmt.Sprintf("/api/members/%d/limits", id)
+		result := request(h, http.MethodPatch, path, "http://example.test", policy, cookie)
+		var limits gateway.MemberLimit
+		if result.Code != http.StatusOK || json.Unmarshal(result.Body.Bytes(), &limits) != nil || limits.UserID != id || limits.MaxConcurrency != 5 {
+			t.Fatalf("owner could not update user %d: %d %s", id, result.Code, result.Body.String())
+		}
+	}
+	if result := request(h, http.MethodPatch, fmt.Sprintf("/api/members/%d/limits", foreign.ID), "http://example.test", policy, cookie); result.Code != http.StatusNotFound {
+		t.Fatalf("owner changed a foreign workspace member: %d %s", result.Code, result.Body.String())
+	}
+	var unchanged int64
+	if err := connection.QueryRowContext(ctx, "SELECT max_concurrency FROM memberships WHERE tenant_id=1 AND user_id=?", owner.ID).Scan(&unchanged); err != nil || unchanged != 10 {
+		t.Fatalf("another workspace's limits changed: %d %v", unchanged, err)
+	}
+	memberSession, err := identity.Login(ctx, member.Username, "synthetic password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	memberCookie := &http.Cookie{Name: sessionCookie, Value: memberSession.Token}
+	if result := request(h, http.MethodPatch, fmt.Sprintf("/api/members/%d/limits", owner.ID), "http://example.test", policy, memberCookie); result.Code != http.StatusForbidden {
+		t.Fatalf("member changed owner limits: %d %s", result.Code, result.Body.String())
 	}
 }

@@ -156,7 +156,9 @@ func TestFormerProxyCheckArchiveStillRestores(t *testing.T) {
 	}
 	// Keep this archive on its historical schema so restore exercises newer migrations.
 	if _, err := connection.ExecContext(ctx, `ALTER TABLE request_records DROP COLUMN reasoning_effort;
-DELETE FROM schema_migrations WHERE name='006_reasoning_effort.sql';
+ALTER TABLE memberships DROP COLUMN max_concurrency;
+ALTER TABLE memberships ADD COLUMN max_concurrency INTEGER NOT NULL DEFAULT 0 CHECK(max_concurrency BETWEEN 0 AND 8);
+DELETE FROM schema_migrations WHERE name IN ('006_reasoning_effort.sql','007_member_concurrency.sql');
 INSERT INTO schema_migrations(name) VALUES('004_proxy_checks.sql')`); err != nil {
 		t.Fatal(err)
 	}

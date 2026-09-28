@@ -86,6 +86,89 @@ func TestOpenAddsInvitationMigrationToExistingSchema(t *testing.T) {
 	}
 }
 
+func TestOpenUpdatesMemberConcurrencyDefaultAndPreservesLimits(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "synthetic-members.db")
+	previous, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = previous.Close() })
+	initial, err := migrations.ReadFile("migrations/001_schema.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, statement := range []string{
+		`CREATE TABLE schema_migrations (name TEXT PRIMARY KEY NOT NULL, applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
+		string(initial),
+		`INSERT INTO schema_migrations(name) VALUES('001_schema.sql')`,
+		`INSERT INTO users(id,username,password_hash,role,created_at) VALUES
+		 (1,'synthetic-owner','synthetic-hash','admin',1),
+		 (2,'synthetic-member','synthetic-hash','member',1),
+		 (3,'synthetic-admin','synthetic-hash','member',1)`,
+		`INSERT INTO tenants(id,name,owner_user_id,created_at) VALUES(1,'Synthetic workspace',1,1)`,
+		`INSERT INTO memberships(tenant_id,user_id,role,enabled,requests_per_minute,max_concurrency,created_at) VALUES
+		 (1,1,'owner',1,0,0,1), (1,2,'member',0,60,2,1), (1,3,'admin',1,100,8,1)`,
+		`INSERT INTO member_rate(tenant_id,user_id,window_start,requests) VALUES(1,2,1900000020,5)`,
+	} {
+		if _, err := previous.ExecContext(ctx, statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := previous.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for attempt := range 2 {
+		upgraded, err := Open(ctx, path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = upgraded.Close() })
+		for _, want := range []struct {
+			userID, enabled, rpm, concurrency int64
+			role                              string
+		}{{1, 1, 0, 0, "owner"}, {2, 0, 60, 2, "member"}, {3, 1, 100, 8, "admin"}} {
+			var enabled, rpm, concurrency int64
+			var role string
+			err := upgraded.QueryRowContext(ctx, "SELECT role,enabled,requests_per_minute,max_concurrency FROM memberships WHERE tenant_id=1 AND user_id=?", want.userID).Scan(&role, &enabled, &rpm, &concurrency)
+			if err != nil || role != want.role || enabled != want.enabled || rpm != want.rpm || concurrency != want.concurrency {
+				t.Fatalf("member %d changed: role=%q enabled=%d rpm=%d concurrency=%d err=%v", want.userID, role, enabled, rpm, concurrency, err)
+			}
+		}
+		var start, requests int64
+		if err := upgraded.QueryRowContext(ctx, "SELECT window_start,requests FROM member_rate WHERE tenant_id=1 AND user_id=2").Scan(&start, &requests); err != nil || start != 1900000020 || requests != 5 {
+			t.Fatalf("member rate window was lost: start=%d requests=%d err=%v", start, requests, err)
+		}
+		if attempt == 0 {
+			for _, statement := range []string{
+				`INSERT INTO users(id,username,password_hash,role,created_at) VALUES
+				 (4,'synthetic-new-member','synthetic-hash','member',2),
+				 (5,'synthetic-new-admin','synthetic-hash','member',2),
+				 (6,'synthetic-new-owner','synthetic-hash','member',2)`,
+				`INSERT INTO tenants(id,name,owner_user_id,created_at) VALUES(2,'New synthetic workspace',6,2)`,
+				`INSERT INTO memberships(tenant_id,user_id,role,created_at) VALUES
+				 (2,4,'member',2), (2,5,'admin',2), (2,6,'owner',2)`,
+			} {
+				if _, err := upgraded.ExecContext(ctx, statement); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+		for _, userID := range []int64{4, 5, 6} {
+			var rpm, concurrency int64
+			if err := upgraded.QueryRowContext(ctx, "SELECT requests_per_minute,max_concurrency FROM memberships WHERE tenant_id=2 AND user_id=?", userID).Scan(&rpm, &concurrency); err != nil || rpm != 0 || concurrency != 10 {
+				t.Fatalf("new member %d defaults: rpm=%d concurrency=%d err=%v", userID, rpm, concurrency, err)
+			}
+		}
+		if _, err := upgraded.ExecContext(ctx, "UPDATE memberships SET max_concurrency=11 WHERE tenant_id=2 AND user_id=4"); err == nil {
+			t.Fatal("database accepted concurrency above 10")
+		}
+		if err := upgraded.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 func TestOpenAddsReasoningEffortAndPreservesRequestHistory(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "synthetic-history.db")

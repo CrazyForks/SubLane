@@ -66,7 +66,7 @@ func (q *Queries) GetMemberWindow(ctx context.Context, arg GetMemberWindowParams
 
 const setMemberLimits = `-- name: SetMemberLimits :execrows
 UPDATE memberships SET requests_per_minute=?1,max_concurrency=?2
-WHERE tenant_id=?3 AND user_id=?4 AND role='member'
+WHERE tenant_id=?3 AND user_id=?4
 `
 
 type SetMemberLimitsParams struct {
@@ -76,6 +76,7 @@ type SetMemberLimitsParams struct {
 	UserID            int64
 }
 
+// Limits apply to every workspace role, including the owner's own membership.
 func (q *Queries) SetMemberLimits(ctx context.Context, arg SetMemberLimitsParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, setMemberLimits,
 		arg.RequestsPerMinute,
