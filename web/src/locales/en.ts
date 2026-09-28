@@ -133,6 +133,11 @@ export const en = {
   allocationCurrentPricing: 'Current price coverage',
   allocationScheduledPricing: 'Scheduled price coverage',
   allocationStartNext: 'Start next period',
+  allocationApplyNow: 'Apply immediately',
+  allocationApplyNowWarning:
+    'Changes will apply to new requests immediately. Ongoing requests are not affected.',
+  allocationScheduledHint:
+    'Changes will take effect at the start of the next period (safer)',
   allocationImmediateHint:
     'Start immediately: the budget counts new requests from activation. Earlier usage is not backfilled.',
   allocationScheduled: '{{mode}} takes effect {{date}}',
@@ -221,6 +226,8 @@ export const en = {
   requestFilterHint:
     'Search retained requests from the last 7 days. Names match exactly.',
   requestFirstTokenValue: 'First output: {{value}}',
+  requestReasoningEffort: 'Reasoning effort',
+  requestReasoningEffortValue: 'Reasoning effort: {{value}}',
   requestFirstToken: 'First output latency',
   requestFirstTokenHint:
     'Time from gateway processing to the first text, reasoning, or tool argument delta. Not measured when no output delta is observed.',
