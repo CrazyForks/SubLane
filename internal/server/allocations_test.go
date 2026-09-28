@@ -196,7 +196,7 @@ func TestSchemeKeysIsolateTeamsAcrossHTTPAndWebSocket(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	call(duplicate.Secret, 429)
+	call(duplicate.Secret, 403)
 	page, err := manager.Own(ctx, f.userID)
 	if err != nil || len(page) != 2 {
 		t.Fatal(page, err)
@@ -251,7 +251,7 @@ func TestTokenShareGatewayChargesWithoutQuotaSynchronization(t *testing.T) {
 		}
 	}
 	call(200)
-	call(429)
+	call(403)
 	detail, err := manager.Detail(ctx, scheme.ID, f.userID)
 	if err != nil || len(detail.Balances) != 1 || detail.Balances[0].Mode != "tokens" || detail.Balances[0].Limit != 5 || detail.Balances[0].Used != 5 {
 		t.Fatal(detail, err)
