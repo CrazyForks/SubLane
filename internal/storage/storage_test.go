@@ -86,6 +86,48 @@ func TestOpenAddsInvitationMigrationToExistingSchema(t *testing.T) {
 	}
 }
 
+func TestOpenAddsReasoningEffortAndPreservesRequestHistory(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "synthetic-history.db")
+	previous, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := previous.ExecContext(ctx, `CREATE TABLE schema_migrations (name TEXT PRIMARY KEY NOT NULL, applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"001_schema.sql", "002_invitations.sql", "003_proxies.sql", "004_allocation_started_index.sql", "005_operational_indexes.sql"} {
+		data, err := migrations.ReadFile("migrations/" + name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := previous.ExecContext(ctx, string(data)); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := previous.ExecContext(ctx, "INSERT INTO schema_migrations(name) VALUES(?)", name); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := previous.ExecContext(ctx, `INSERT INTO request_records(user_id,key_id,group_id,model,transport,operation,started_at,duration_ms,outcome,request_id) VALUES(1,1,1,'synthetic-model','http','responses',1900000000,42,'success','req_synthetic_legacy')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := previous.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		upgraded, err := Open(ctx, path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var effort, requestID string
+		err = upgraded.QueryRowContext(ctx, "SELECT reasoning_effort,request_id FROM request_records").Scan(&effort, &requestID)
+		upgraded.Close()
+		if err != nil || effort != "" || requestID != "req_synthetic_legacy" {
+			t.Fatalf("retained history: effort=%q id=%q err=%v", effort, requestID, err)
+		}
+	}
+}
+
 const formerProxySchema = `CREATE TABLE proxies (
  id TEXT PRIMARY KEY NOT NULL,
  tenant_id INTEGER NOT NULL REFERENCES tenants(id),
@@ -172,7 +214,11 @@ func TestOpenAddsProxyCheckColumnsToExistingProxySchema(t *testing.T) {
 		t.Fatalf("proxy migration: %q %d %d %d %v", name, revision, checkedAt, reachable, err)
 	}
 	var count int
-	if err := upgraded.QueryRowContext(ctx, "SELECT count(*) FROM schema_migrations").Scan(&count); err != nil || count != 5 {
+	wantMigrations, err := CurrentSchemaVersion()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := upgraded.QueryRowContext(ctx, "SELECT count(*) FROM schema_migrations").Scan(&count); err != nil || count != wantMigrations {
 		t.Fatalf("merged migration count: %d %v", count, err)
 	}
 }
@@ -192,7 +238,11 @@ func TestOpenNormalizesFormerProxyCheckMigration(t *testing.T) {
 		t.Fatalf("former proxy data: %d %q %v", checkedAt, exitIP, err)
 	}
 	var count int
-	if err := upgraded.QueryRowContext(ctx, "SELECT count(*) FROM schema_migrations").Scan(&count); err != nil || count != 5 {
+	wantMigrations, err := CurrentSchemaVersion()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := upgraded.QueryRowContext(ctx, "SELECT count(*) FROM schema_migrations").Scan(&count); err != nil || count != wantMigrations {
 		t.Fatalf("former migration record retained: %d %v", count, err)
 	}
 }
@@ -211,7 +261,7 @@ func TestValidateSnapshotAcceptsFormerProxyCheckHistory(t *testing.T) {
 		t.Fatalf("former backup history: %d %v", version, err)
 	}
 	current, err := CurrentSchemaVersion()
-	if err != nil || current != 5 {
+	if err != nil || current <= version {
 		t.Fatalf("merged current version: %d %v", current, err)
 	}
 }

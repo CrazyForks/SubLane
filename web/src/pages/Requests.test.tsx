@@ -4,6 +4,7 @@ import { createMemoryHistory } from '@tanstack/react-router'
 import { expect, it, vi } from 'vitest'
 import { App } from '@/App'
 import { createAppRouter } from '@/router'
+import { i18n } from '@/lib/i18n'
 import { authenticated, memberAuthenticated, workspaces } from '@/test/fixtures'
 
 it.each(['responses', 'messages', 'gemini'])(
@@ -324,3 +325,89 @@ it('filters diagnostics by model and caller, then copies the request ID', async 
     ),
   )
 })
+
+it.each(
+  (['en', 'zh'] as const).flatMap((language) =>
+    (['high', '', undefined] as const).flatMap((effort) =>
+      [
+        ['/requests', memberAuthenticated, '/api/me/requests?'],
+        ['/admin/requests', authenticated, '/api/requests?'],
+      ].map(([path, session, endpoint]) => ({
+        language,
+        effort,
+        path: path as string,
+        session: session as typeof authenticated | typeof memberAuthenticated,
+        endpoint: endpoint as string,
+      })),
+    ),
+  ),
+)(
+  'shows reasoning effort $effort in $path using $language',
+  async ({ language, effort, path, session, endpoint }) => {
+    await i18n.changeLanguage(language)
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation((url: string) => {
+        let data: unknown = { accounts: [] }
+        if (url === '/api/auth/state') data = session
+        if (url === '/api/workspaces') data = workspaces
+        if (url.startsWith(endpoint))
+          data = {
+            requests: [
+              {
+                id: 1,
+                user_id: session.user.id,
+                key_id: 1,
+                group_id: 1,
+                account_id: '',
+                account_name: '',
+                provider: 'codex',
+                model: 'synthetic-model',
+                reasoning_effort: effort,
+                transport: 'http',
+                operation: 'responses',
+                started_at: 1900000000,
+                duration_ms: 125,
+                request_id: 'req_synthetic_effort',
+                first_token_ms: 42,
+                outcome: 'success',
+                error_code: '',
+                upstream_status: 200,
+                input_tokens: 12,
+                output_tokens: 4,
+                cached_tokens: null,
+                username: session.user.username,
+                key_name: 'Synthetic effort client',
+                group_name: 'Synthetic pool',
+              },
+            ],
+            next_cursor: 0,
+          }
+        return Promise.resolve(new Response(JSON.stringify(data)))
+      }),
+    )
+    render(
+      <App
+        router={createAppRouter(
+          createMemoryHistory({ initialEntries: [path] }),
+        )}
+      />,
+    )
+    const value = effort || '—'
+    const label = language === 'zh' ? '推理强度' : 'Reasoning effort'
+    expect(
+      await screen.findByText(
+        `${label}${language === 'zh' ? '：' : ': '}${value}`,
+      ),
+    ).toBeTruthy()
+    const user = userEvent.setup()
+    await user.click(
+      screen.getByRole('button', {
+        name: language === 'zh' ? '查看请求详情' : 'View request details',
+      }),
+    )
+    const dialog = await screen.findByRole('dialog')
+    const term = within(dialog).getByText(label)
+    expect(term.nextElementSibling?.textContent).toBe(value)
+  },
+)

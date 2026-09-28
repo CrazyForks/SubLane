@@ -221,6 +221,8 @@ export const en = {
   requestFilterHint:
     'Search retained requests from the last 7 days. Names match exactly.',
   requestFirstTokenValue: 'First output: {{value}}',
+  requestReasoningEffort: 'Reasoning effort',
+  requestReasoningEffortValue: 'Reasoning effort: {{value}}',
   requestFirstToken: 'First output latency',
   requestFirstTokenHint:
     'Time from gateway processing to the first text, reasoning, or tool argument delta. Not measured when no output delta is observed.',

@@ -27,6 +27,7 @@ export function RequestDetails({
     n === null ? '—' : `${numbers.format(n)} ms`
   const rows = [
     [t('requestModel'), value.model || '—'],
+    [t('requestReasoningEffort'), value.reasoning_effort || '—'],
     [
       t('requestCaller'),
       `${value.username || `#${value.user_id}`} · ${value.key_name || `#${value.key_id}`}`,

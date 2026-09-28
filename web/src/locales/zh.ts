@@ -208,6 +208,8 @@ export const zh: Record<keyof typeof en, string> = {
   requestFiltersFailed: '无法加载成员与密钥选项。',
   requestFilterHint: '搜索最近 7 天保留的请求，模型名称需精确匹配。',
   requestFirstTokenValue: '首个输出：{{value}}',
+  requestReasoningEffort: '推理强度',
+  requestReasoningEffortValue: '推理强度：{{value}}',
   requestFirstToken: '首个输出延迟',
   requestFirstTokenHint:
     '从网关开始处理到收到首个文本、推理或工具参数增量的时间。未观察到输出增量时不计。',

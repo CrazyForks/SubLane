@@ -2,6 +2,8 @@ package gateway
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -97,5 +99,69 @@ func TestDiagnosticFiltersComposeBeforePaginationAndPreserveOwner(t *testing.T) 
 		if _, err := s.Requests(ctx, bad); err == nil {
 			t.Fatal("invalid filter admitted", bad)
 		}
+	}
+}
+
+func TestRequestsRecordReasoningEffort(t *testing.T) {
+	for _, tc := range []struct {
+		name, fields, want, transport string
+		kind                          Kind
+		rejected                      bool
+	}{
+		{name: "responses", fields: `,"reasoning":{"effort":"high"}`, want: "high", kind: Responses},
+		{name: "websocket", fields: `,"reasoning":{"effort":"xhigh"}`, want: "xhigh", kind: Responses, transport: "websocket"},
+		{name: "chat", fields: `,"reasoning_effort":"low"`, want: "low", kind: Chat},
+		{name: "rejected", fields: `,"reasoning":{"effort":"medium"}`, want: "medium", kind: Responses, rejected: true},
+		{name: "compact", fields: `,"reasoning":{"effort":"minimal"}`, want: "minimal", kind: Compact, rejected: true},
+		{name: "none", fields: `,"reasoning":{"effort":"none"}`, want: "none", kind: Responses},
+		{name: "max", fields: `,"reasoning":{"effort":"max"}`, want: "max", kind: Responses},
+		{name: "ultra", fields: `,"reasoning":{"effort":"ultra"}`, want: "ultra", kind: Responses},
+		{name: "omitted", kind: Responses},
+		{name: "unknown", fields: `,"reasoning":{"effort":"synthetic-private-text"}`, kind: Responses},
+		{name: "wrong type", fields: `,"reasoning":{"effort":42}`, kind: Responses},
+		{name: "malformed reasoning", fields: `,"reasoning":[]`, kind: Responses},
+		{name: "chat field on responses", fields: `,"reasoning_effort":"high"`, kind: Responses},
+		{name: "responses field on chat", fields: `,"reasoning":{"effort":"high"}`, kind: Chat},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, _ := codexGateway(t, transportFunc(func(*http.Request) (*http.Response, error) { return syntheticStream(), nil }))
+			ctx := WithRequestIdentity(context.Background(), 42, tc.transport)
+			model := "synthetic-model"
+			if tc.rejected {
+				model = "synthetic-unsupported-model"
+			}
+			raw := []byte(`{"model":"` + model + `","input":"synthetic","messages":[{"role":"user","content":"synthetic"}]` + tc.fields + `}`)
+			x, err := s.Open(ctx, 1, 1, raw, nil, tc.kind)
+			if tc.rejected {
+				if !errors.Is(err, ErrModelUnavailable) {
+					t.Fatal("expected model rejection", err)
+				}
+			} else {
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := x.Events(func([]byte) error { return nil }); err != nil {
+					t.Fatal(err)
+				}
+				x.Body.Close()
+			}
+			for _, owner := range []int64{0, 1} {
+				page, err := s.requests(ctx, owner, RequestFilter{})
+				if err != nil || len(page.Requests) != 1 {
+					t.Fatal("request history", err, len(page.Requests))
+				}
+				encoded, err := json.Marshal(page.Requests[0])
+				if err != nil {
+					t.Fatal(err)
+				}
+				var metadata map[string]any
+				if err := json.Unmarshal(encoded, &metadata); err != nil {
+					t.Fatal(err)
+				}
+				if metadata["reasoning_effort"] != tc.want {
+					t.Fatalf("owner=%d reasoning_effort=%v want=%q", owner, metadata["reasoning_effort"], tc.want)
+				}
+			}
+		})
 	}
 }
