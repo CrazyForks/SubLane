@@ -83,7 +83,7 @@ func NewForTenant(ctx context.Context, connection *sql.DB, accounts *accounts.Se
 	if len(catalogs) > 0 {
 		catalog = catalogs[0]
 	}
-	return &Service{memberActive: make(map[int64]int64), next: make(map[string]int), health: make(map[string]*Runtime), now: time.Now, runContext: runContext, stopRuntime: stopRuntime, db: connection, queries: db.New(connection), accounts: accounts, tenantID: tenantID, provider: provider, slots: make(chan struct{}, 8), usage: newUsageCache(ctx), catalog: newCatalogCache(ctx), pricing: catalog}
+	return &Service{memberActive: make(map[int64]int64), next: make(map[string]int), health: make(map[string]*Runtime), now: time.Now, runContext: runContext, stopRuntime: stopRuntime, db: connection, queries: db.New(connection), accounts: accounts, tenantID: tenantID, provider: provider, slots: make(chan struct{}, 30), usage: newUsageCache(ctx), catalog: newCatalogCache(ctx), pricing: catalog}
 }
 
 func (s *Service) Acquire() (func(), error) {
