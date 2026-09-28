@@ -27,7 +27,7 @@ func (e *observation) settleAllocation(ctx context.Context, q *db.Queries) error
 		}
 		return 0
 	}
-	known := e.record.InputTokens != nil && e.record.OutputTokens != nil && (e.record.Outcome == "success" || e.record.Outcome == "incomplete")
+	known := e.record.InputTokens != nil && e.record.OutputTokens != nil && (e.usageFinal || e.record.Outcome == "success" || e.record.Outcome == "incomplete")
 	rejected := e.record.UpstreamStatus != nil && *e.record.UpstreamStatus >= 400
 	err := allocations.Finish(ctx, q, e.record.RequestID, allocations.Completion{Input: value(e.record.InputTokens), Output: value(e.record.OutputTokens), Cached: value(e.record.CachedTokens), Known: known, Dispatched: e.upstreamDispatched, Rejected: rejected}, e.service.now().UnixMilli(), false)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -43,7 +43,7 @@ func (s *Service) PrepareAllocations(ctx context.Context) error {
 }
 
 func (s *Service) prepareAllocation(ctx context.Context, e *observation) error {
-	if err := s.recoverAllocations(ctx); err != nil {
+	if err := s.ensureAllocationsReady(ctx); err != nil {
 		return err
 	}
 	scheme, err := allocations.KeyScheme(ctx, s.queries, e.record.KeyID, e.record.UserID, e.record.GroupID, s.now().Unix())
@@ -51,20 +51,50 @@ func (s *Service) prepareAllocation(ctx context.Context, e *observation) error {
 		return err
 	}
 	e.schemeID = scheme
+	if err := s.retryFailedSettlements(ctx); err != nil {
+		for _, failed := range s.failedSettlements {
+			if failed.schemeID == scheme && failed.record.UserID == e.record.UserID {
+				return ErrAllocationAccounting
+			}
+		}
+	}
 	return nil
 }
 
-// Recover interrupted allocation requests before admitting new work after a restart.
+// Startup recovery is global; live write failures retry their own requests only.
 func (s *Service) recoverAllocations(ctx context.Context) error {
-	if s.allocationFailure {
+	if err := s.ensureAllocationsReady(ctx); err != nil {
+		return err
+	}
+	if err := s.retryFailedSettlements(ctx); err != nil {
 		return ErrAllocationAccounting
 	}
+	return nil
+}
+
+func (s *Service) ensureAllocationsReady(ctx context.Context) error {
 	if s.allocationsReady {
 		return nil
 	}
+	// Only startup can safely convert every active row to pending.
 	if err := s.queries.RecoverAllocationEntries(ctx, s.tenantID); err != nil {
 		return ErrAllocationAccounting
 	}
 	s.allocationsReady = true
 	return nil
+}
+
+func (s *Service) retryFailedSettlements(ctx context.Context) error {
+	var firstErr error
+	var remaining []*observation
+	for _, failed := range s.failedSettlements {
+		if err := s.persistObservation(ctx, failed); err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			remaining = append(remaining, failed)
+		}
+	}
+	s.failedSettlements = remaining
+	return firstErr
 }

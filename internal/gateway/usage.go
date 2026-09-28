@@ -22,12 +22,13 @@ var errUsageChanged = errors.New("account_usage_changed")
 // UsageSnapshot separates the observation time from the response clock and refresh state.
 type UsageSnapshot struct {
 	upstream.Usage
-	ServerTime        int64 `json:"server_time"`
-	ExpiresAt         int64 `json:"expires_at"`
-	Stale             bool  `json:"stale"`
-	Refreshing        bool  `json:"refreshing"`
-	RefreshFailed     bool  `json:"refresh_failed"`
-	RetryAfterSeconds int64 `json:"retry_after_seconds"`
+	ServerTime        int64  `json:"server_time"`
+	ExpiresAt         int64  `json:"expires_at"`
+	Stale             bool   `json:"stale"`
+	Refreshing        bool   `json:"refreshing"`
+	RefreshFailed     bool   `json:"refresh_failed"`
+	RefreshError      string `json:"refresh_error,omitempty"`
+	RetryAfterSeconds int64  `json:"retry_after_seconds"`
 }
 
 type usageEntry struct {
@@ -256,6 +257,9 @@ func (s *Service) fetchUsage(id string, e *usageEntry, release func()) {
 
 func snapshotState(e *usageEntry, now time.Time) UsageSnapshot {
 	result := UsageSnapshot{ServerTime: now.Unix(), Refreshing: e.flight != nil, RefreshFailed: e.err != nil, RetryAfterSeconds: max(0, int64(math.Ceil(e.retryAt.Sub(now).Seconds())))}
+	if e.err != nil {
+		result.RefreshError = usageRefreshError(e.err)
+	}
 	if e.snapshot == nil {
 		return result
 	}
@@ -270,6 +274,37 @@ func snapshotState(e *usageEntry, now time.Time) UsageSnapshot {
 	}
 	result.Stale = e.err != nil || now.Unix() >= result.ExpiresAt || now.Unix() < result.UpdatedAt
 	return result
+}
+
+// usageRefreshError exposes only stable, user-safe categories. Provider errors can
+// contain response details, so they must never be serialized directly into usage JSON.
+func usageRefreshError(err error) string {
+	if err == nil {
+		return ""
+	}
+	var rejected *upstream.UpstreamError
+	switch {
+	case errors.Is(err, accounts.ErrReauthorize):
+		return "reauthorization_required"
+	case errors.Is(err, accounts.ErrRefresh):
+		return "credential_refresh_failed"
+	case errors.Is(err, upstream.ErrUsageUnsupported):
+		return "provider_usage_unsupported"
+	case errors.Is(err, context.DeadlineExceeded):
+		return "refresh_timeout"
+	case errors.Is(err, upstream.ErrResponse):
+		return "invalid_upstream_response"
+	case errors.As(err, &rejected) && rejected.Status == 429:
+		return "rate_limited"
+	case errors.As(err, &rejected) && rejected.Status >= 400 && rejected.Status < 500:
+		return "upstream_rejected"
+	case errors.As(err, &rejected) && rejected.Status >= 500:
+		return "upstream_unavailable"
+	case errors.Is(err, upstream.ErrUpstream):
+		return "upstream_unavailable"
+	default:
+		return "refresh_failed"
+	}
 }
 
 func (s *Service) acquireUsage() (func(), error) {

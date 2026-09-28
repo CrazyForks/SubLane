@@ -7,6 +7,7 @@ import (
 	"github.com/murongg/SubLane/internal/accounts"
 	"github.com/murongg/SubLane/internal/groups"
 	"github.com/murongg/SubLane/internal/storage/db"
+	"github.com/murongg/SubLane/internal/upstream"
 	"io"
 	"net/http"
 	"strings"
@@ -80,6 +81,7 @@ func TestAccountConcurrencySupportsThirtyAndPreservesLimitAcrossRestart(t *testi
 func TestAccountLeaseCoversStreamAndRejectsStickyOverload(t *testing.T) {
 	ctx := context.Background()
 	service, ids := codexGateway(t, transportFunc(func(*http.Request) (*http.Response, error) { return syntheticStream(), nil }))
+	service.accountWaitTimeout = time.Millisecond
 	if err := service.SetConcurrency(ctx, ids["codex"], 1); err != nil {
 		t.Fatal(err)
 	}
@@ -141,6 +143,7 @@ func TestRateLimitCooldownSurvivesRestartAndOnlyOneRecoveryProbe(t *testing.T) {
 	}
 	response.Body.Close()
 	restarted := New(ctx, service.db, service.accounts, service.provider)
+	restarted.accountWaitTimeout = time.Millisecond
 	defer restarted.Close()
 	restarted.now = service.now
 	if _, err := restarted.Open(ctx, 1, 1, raw, nil, Responses); !errors.Is(err, ErrAccountCooling) {
@@ -249,6 +252,175 @@ func TestCancellationAndShutdownReleaseAccountLease(t *testing.T) {
 	case <-done:
 	case <-time.After(3 * time.Second):
 		t.Fatal("shutdown did not drain leases")
+	}
+}
+
+func TestCanceledClientCanDrainFinalUsage(t *testing.T) {
+	service, _ := codexGateway(t, transportFunc(func(*http.Request) (*http.Response, error) { return syntheticStream(), nil }))
+	ctx, cancel := context.WithCancel(context.Background())
+	entry, err := service.begin(ctx, 1, 1, Responses)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry.record.Provider = "codex"
+	reader, writer := io.Pipe()
+	stream := &upstream.Stream{Response: &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: reader}}
+	upstreamCtx, release := drainingUpstreamContext(ctx, service.runContext, time.Second)
+	x := trackExchange(stream, entry, upstreamCtx, release)
+	done := make(chan error, 1)
+	go func() {
+		done <- x.Events(func([]byte) error {
+			cancel()
+			return ctx.Err()
+		})
+	}()
+	if _, err := io.WriteString(writer, "data: {\"type\":\"response.created\"}\n\n"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.WriteString(writer, "data: {\"type\":\"response.completed\",\"response\":{\"output\":[],\"usage\":{\"input_tokens\":3,\"output_tokens\":1}}}\n\n"); err != nil {
+		t.Fatal("upstream was closed before final usage", err)
+	}
+	writer.Close()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatal("client cancellation was lost", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("stream did not finish after final usage")
+	}
+	x.Body.Close()
+	if entry.record.InputTokens == nil || *entry.record.InputTokens != 3 || !entry.usageFinal {
+		t.Fatal("final usage was not collected after disconnect")
+	}
+}
+
+func TestOpenCanReadFinalUsageAfterCancelWhileAwaitingHeaders(t *testing.T) {
+	entered := make(chan *http.Request, 1)
+	release := make(chan struct{})
+	service, _ := codexGateway(t, transportFunc(func(request *http.Request) (*http.Response, error) {
+		entered <- request
+		select {
+		case <-release:
+			return syntheticStream(), nil
+		case <-request.Context().Done():
+			return nil, request.Context().Err()
+		}
+	}))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	type opened struct {
+		x   *Exchange
+		err error
+	}
+	done := make(chan opened, 1)
+	go func() {
+		x, err := service.Open(ctx, 1, 1, []byte(`{"model":"synthetic-model","input":"synthetic"}`), nil, Responses)
+		done <- opened{x, err}
+	}()
+	var request *http.Request
+	select {
+	case request = <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("upstream request was not sent")
+	}
+	cancel()
+	select {
+	case <-request.Context().Done():
+		t.Fatal("upstream request was canceled before usage could arrive")
+	default:
+	}
+	close(release)
+	var result opened
+	select {
+	case result = <-done:
+	case <-time.After(time.Second):
+		t.Fatal("Open did not return after upstream headers")
+	}
+	if result.err != nil {
+		t.Fatal(result.err)
+	}
+	if err := result.x.Events(func([]byte) error { return ctx.Err() }); !errors.Is(err, context.Canceled) {
+		t.Fatal("client cancellation was not retained", err)
+	}
+	result.x.Body.Close()
+	page, err := service.Requests(context.Background(), RequestFilter{})
+	if err != nil || len(page.Requests) != 1 || page.Requests[0].InputTokens == nil || *page.Requests[0].InputTokens != 3 {
+		t.Fatal("final usage was not recorded", err)
+	}
+}
+
+func TestCanceledUpstreamDrainDeadlineReleasesExchange(t *testing.T) {
+	clientCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	upstreamCtx, release := drainingUpstreamContext(clientCtx, context.Background(), 20*time.Millisecond)
+	service, _ := codexGateway(t, transportFunc(func(*http.Request) (*http.Response, error) { return syntheticStream(), nil }))
+	entry, err := service.begin(clientCtx, 1, 1, Responses)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry.record.Provider = "codex"
+	reader, writer := io.Pipe()
+	defer writer.Close()
+	x := trackExchange(&upstream.Stream{Response: &http.Response{StatusCode: 200, Header: make(http.Header), Body: reader}}, entry, upstreamCtx, release)
+	cancel()
+	select {
+	case <-upstreamCtx.Done():
+	case <-time.After(time.Second):
+		t.Fatal("drain did not reach its deadline")
+	}
+	deadline := time.After(time.Second)
+	for {
+		x.mu.Lock()
+		closed := x.closed
+		x.mu.Unlock()
+		if closed {
+			break
+		}
+		select {
+		case <-deadline:
+			x.Body.Close()
+			t.Fatal("expired drain did not close the exchange")
+		case <-time.After(time.Millisecond):
+		}
+	}
+}
+
+func TestRepeatedTerminalWithoutUsageDoesNotCoolAccount(t *testing.T) {
+	service, _ := codexGateway(t, transportFunc(func(*http.Request) (*http.Response, error) {
+		body := `data: {"type":"response.completed","response":{"id":"synthetic","output":[]}}` + "\n\n"
+		return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(body))}, nil
+	}))
+	ctx := context.Background()
+	raw := []byte(`{"model":"synthetic-model","input":"synthetic"}`)
+	for range 3 {
+		x, err := service.Open(ctx, 1, 1, raw, nil, Responses)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := x.Events(func([]byte) error { return nil }); err != nil {
+			t.Fatal(err)
+		}
+		x.Body.Close()
+	}
+	x, err := service.Open(ctx, 1, 1, raw, nil, Responses)
+	if err != nil {
+		t.Fatal("successful requests without reported usage cooled the account", err)
+	}
+	x.Body.Close()
+}
+
+func TestCanceledRequestDoesNotDispatchUpstream(t *testing.T) {
+	var dispatched atomic.Int64
+	service, _ := codexGateway(t, transportFunc(func(*http.Request) (*http.Response, error) {
+		dispatched.Add(1)
+		return syntheticStream(), nil
+	}))
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := service.Open(ctx, 1, 1, []byte(`{"model":"synthetic-model","input":"synthetic"}`), nil, Responses)
+	if !errors.Is(err, context.Canceled) || dispatched.Load() != 0 {
+		t.Fatal("canceled request reached upstream", err, dispatched.Load())
 	}
 }
 

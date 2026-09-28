@@ -2,10 +2,16 @@ import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { RefreshCw } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
-import { refreshUsage, usageOptions, type UsageWindow } from '@/lib/usage'
+import {
+  refreshUsage,
+  usageOptions,
+  usageReasonKey,
+  type UsageWindow,
+} from '@/lib/usage'
 import { cn } from '@/lib/cn'
 import { Button } from './ui/Button'
 import { useTimeZone } from '@/lib/timezone'
+import { ApiError } from '@/lib/request'
 
 export function AccountUsage({ id, name }: { id: string; name: string }) {
   const { t, i18n } = useTranslation()
@@ -40,6 +46,13 @@ export function AccountUsage({ id, name }: { id: string; name: string }) {
     (!query.isError && !refresh.isError && query.data?.refreshing === true)
   const failed =
     query.isError || refresh.isError || query.data?.refresh_failed === true
+  const refreshError =
+    refresh.error instanceof ApiError
+      ? refresh.error
+      : query.error instanceof ApiError
+        ? query.error
+        : query.data?.refresh_error
+  const reason = t(usageReasonKey(refreshError))
   const stale =
     query.data &&
     (query.data.stale || snapshotNow >= query.data.expires_at * 1000)
@@ -72,7 +85,7 @@ export function AccountUsage({ id, name }: { id: string; name: string }) {
       )}
       {failed ? (
         <p role="status" className="text-xs text-warning">
-          {t(query.data ? 'usageStale' : 'usageLoadFailed')}
+          {t(query.data ? 'usageStale' : 'usageLoadFailed', { reason })}
         </p>
       ) : stale ? (
         <p role="status" className="text-xs text-muted-foreground">

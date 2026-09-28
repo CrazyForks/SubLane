@@ -13,6 +13,16 @@ import (
 	"github.com/murongg/SubLane/internal/gateway"
 )
 
+func TestAccountQueueFailureIncludesSpecificReasonAndRetry(t *testing.T) {
+	for _, err := range []error{gateway.ErrAccountQueueFull, gateway.ErrAccountWaitTimeout} {
+		w := httptest.NewRecorder()
+		gatewayError(w, err)
+		if w.Code != http.StatusTooManyRequests || w.Header().Get("Retry-After") != "1" || !strings.Contains(w.Body.String(), err.Error()) {
+			t.Fatal("queue failure lost its safe diagnostic or retry", w.Code, w.Header(), w.Body.String())
+		}
+	}
+}
+
 func TestGatewayDiagnosticIDIgnoresCallerAndMatchesRecord(t *testing.T) {
 	f := newForwardFixture(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")

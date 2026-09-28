@@ -207,7 +207,7 @@ func TestGatewayConfiguredRequestBodyLimit(t *testing.T) {
 	fixture := newForwardingFixture(t, "codex", func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
 		w.Header().Set("Content-Type", "text/event-stream")
-		io.WriteString(w, "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_test\",\"output\":[]}}\n\n")
+		io.WriteString(w, "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_test\",\"output\":[],\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n")
 	}, false, limit)
 	for _, chunked := range []bool{false, true} {
 		for _, size := range []int{limit - 1, limit, limit + 1} {
@@ -242,8 +242,10 @@ func TestGatewayConfiguredRequestBodyLimit(t *testing.T) {
 	}
 }
 
-func TestGatewayForwardsResponsesAndCancelsUpstream(t *testing.T) {
+func TestGatewayForwardsResponsesAndDrainsCanceledStream(t *testing.T) {
 	canceled := make(chan struct{}, 1)
+	release := make(chan struct{})
+	completedStream := make(chan struct{}, 1)
 	fixture := newForwardFixture(t, func(w http.ResponseWriter, r *http.Request) {
 		raw, _ := io.ReadAll(r.Body)
 		if r.Header.Get("Authorization") != "Bearer synthetic-upstream-access" {
@@ -259,8 +261,13 @@ func TestGatewayForwardsResponsesAndCancelsUpstream(t *testing.T) {
 		io.WriteString(w, "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_test\"}}\n\n")
 		w.(http.Flusher).Flush()
 		if strings.Contains(string(raw), "synthetic-cancel") {
-			<-r.Context().Done()
-			canceled <- struct{}{}
+			select {
+			case <-release:
+				io.WriteString(w, "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_test\",\"output\":[],\"usage\":{\"input_tokens\":3,\"output_tokens\":2}}}\n\n")
+				completedStream <- struct{}{}
+			case <-r.Context().Done():
+				canceled <- struct{}{}
+			}
 			return
 		}
 		io.WriteString(w, "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_test\",\"output\":[]}}\n\n")
@@ -303,9 +310,33 @@ func TestGatewayForwardsResponsesAndCancelsUpstream(t *testing.T) {
 	response.Body.Close()
 	select {
 	case <-canceled:
-	case <-time.After(3 * time.Second):
-		t.Fatal("upstream request was not canceled")
+		close(release)
+		t.Fatal("upstream was canceled before final usage could arrive")
+	default:
 	}
+	close(release)
+	select {
+	case <-completedStream:
+	case <-time.After(3 * time.Second):
+		t.Fatal("upstream did not finish after disconnect")
+	}
+	deadline := time.After(3 * time.Second)
+	for {
+		page, err := fixture.forwarding.Requests(context.Background(), gateway.RequestFilter{})
+		if err == nil {
+			for _, record := range page.Requests {
+				if record.InputTokens != nil && *record.InputTokens == 3 && record.OutputTokens != nil && *record.OutputTokens == 2 {
+					goto usageRecorded
+				}
+			}
+		}
+		select {
+		case <-deadline:
+			t.Fatal("final usage was not recorded after disconnect")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+usageRecorded:
 	response = call(context.Background(), `{"model":"synthetic-model","input":"synthetic-rate"}`)
 	data, _ := io.ReadAll(response.Body)
 	response.Body.Close()

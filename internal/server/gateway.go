@@ -308,6 +308,8 @@ func gatewayFailure(err error) (int, string) {
 		return 429, "member_busy"
 	case errors.Is(err, gateway.ErrMemberRate):
 		return 429, "member_rate_limited"
+	case errors.Is(err, gateway.ErrAccountQueueFull), errors.Is(err, gateway.ErrAccountWaitTimeout):
+		return 429, err.Error()
 	case errors.Is(err, gateway.ErrAccountBusy):
 		return 429, "account_busy"
 	case errors.Is(err, gateway.ErrBusy), errors.Is(err, gateway.ErrAffinityLimit):

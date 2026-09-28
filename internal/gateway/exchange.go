@@ -6,9 +6,12 @@ import (
 	"errors"
 	"io"
 	"sync"
+	"time"
 
 	"github.com/murongg/SubLane/internal/upstream"
 )
+
+const canceledStreamDrain = 3 * time.Second
 
 // Exchange owns the account lease until body closure, including cancellation and partial streams.
 type Exchange struct {
@@ -17,6 +20,7 @@ type Exchange struct {
 	closeOnce                     sync.Once
 	raw                           io.ReadCloser
 	stop                          func() bool
+	releaseUpstream               func()
 	entry                         *observation
 	closed                        bool
 	outcome, code, penalty, retry string
@@ -25,8 +29,8 @@ type exchangeBody struct{ x *Exchange }
 
 func (b *exchangeBody) Read(p []byte) (int, error) { return b.x.raw.Read(p) }
 func (b *exchangeBody) Close() error               { return b.x.close() }
-func trackExchange(stream *upstream.Stream, entry *observation) *Exchange {
-	x := &Exchange{Stream: stream, entry: entry, raw: stream.Body, outcome: "canceled", code: "client_disconnected"}
+func trackExchange(stream *upstream.Stream, entry *observation, upstreamCtx context.Context, releaseUpstream func()) *Exchange {
+	x := &Exchange{Stream: stream, entry: entry, raw: stream.Body, releaseUpstream: releaseUpstream, outcome: "canceled", code: "client_disconnected"}
 	status := int64(stream.StatusCode)
 	entry.record.UpstreamStatus = &status
 	if entry.record.Provider == "codex" && status >= 200 && status < 300 {
@@ -40,15 +44,23 @@ func trackExchange(stream *upstream.Stream, entry *observation) *Exchange {
 		x.retry = stream.Header.Get("Retry-After")
 	}
 	stream.Body = &exchangeBody{x: x}
+	// A detached Codex stream remains readable until its bounded upstream context ends.
+	closeCtx := entry.ctx
+	if releaseUpstream != nil {
+		closeCtx = upstreamCtx
+	}
 	// Install the callback under the same mutex it acquires; canceled contexts may run it immediately.
 	x.mu.Lock()
-	x.stop = context.AfterFunc(entry.ctx, func() { x.close() })
+	x.stop = context.AfterFunc(closeCtx, func() { x.close() })
 	x.mu.Unlock()
 	return x
 }
 func (x *Exchange) close() error {
 	var err error
 	x.closeOnce.Do(func() {
+		if x.releaseUpstream != nil {
+			x.releaseUpstream()
+		}
 		err = x.raw.Close()
 		x.mu.Lock()
 		defer x.mu.Unlock()
@@ -66,6 +78,7 @@ func (x *Exchange) close() error {
 func (x *Exchange) Events(yield func([]byte) error) error {
 	terminal := ""
 	consumerError := false
+	var downstreamErr error
 	err := x.Stream.Events(func(raw []byte) error {
 		var event struct {
 			Type  string `json:"type"`
@@ -120,19 +133,30 @@ func (x *Exchange) Events(yield func([]byte) error) error {
 						x.entry.record.FirstTokenMs = &elapsed
 					}
 				}
-				if event.Type == "response.completed" || event.Type == "response.incomplete" {
+				if event.Type == "response.completed" || event.Type == "response.incomplete" || event.Type == "response.failed" {
 					terminal = event.Type
 					x.entry.observe(raw)
+					x.entry.usageFinal = x.entry.record.InputTokens != nil && x.entry.record.OutputTokens != nil
 				}
 			}
 		}
 		x.mu.Unlock()
+		if event.Type == "response.failed" || downstreamErr != nil {
+			return nil
+		}
 		err := yield(raw)
 		if err != nil {
 			consumerError = true
+			if x.releaseUpstream != nil && x.entry.ctx.Err() != nil {
+				downstreamErr = err
+				return nil
+			}
 		}
 		return err
 	})
+	if downstreamErr != nil {
+		err = downstreamErr
+	}
 	x.mu.Lock()
 	defer x.mu.Unlock()
 	if !x.closed {

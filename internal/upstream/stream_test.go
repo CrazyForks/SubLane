@@ -45,6 +45,18 @@ func TestSSERequiresTerminalEventAndPropagatesCancellation(t *testing.T) {
 	}
 }
 
+func TestFailedSSEDeliversUsageBeforeInterrupting(t *testing.T) {
+	raw := []byte(`{"type":"response.failed","response":{"usage":{"input_tokens":3,"output_tokens":1}}}`)
+	var seen []byte
+	err := readEvents(strings.NewReader("data: "+string(raw)+"\n\n"), func(event []byte) error {
+		seen = append([]byte(nil), event...)
+		return nil
+	})
+	if !errors.Is(err, ErrInterrupted) || string(seen) != string(raw) {
+		t.Fatal("failed terminal usage was not observed", err, string(seen))
+	}
+}
+
 func TestIncompleteResponsePreservesPartialResult(t *testing.T) {
 	client := New()
 	defer client.Close()

@@ -75,6 +75,8 @@ export const reasonKeys: Record<string, keyof typeof en> = {
   stream_interrupted: 'reasonInterrupted',
   client_disconnected: 'reasonCanceled',
   account_busy: 'reasonAccountBusy',
+  account_queue_full: 'reasonAccountQueueFull',
+  account_wait_timeout: 'reasonAccountWaitTimeout',
   account_cooling: 'reasonCooling',
   account_unavailable: 'reasonAccountUnavailable',
   group_unavailable: 'reasonGroupUnavailable',

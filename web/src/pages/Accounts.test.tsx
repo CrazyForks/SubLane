@@ -596,6 +596,41 @@ it('explains why a quota-exhausted account is skipped for new sessions', async (
   ).toBeTruthy()
 })
 
+it('explains a cooling account separately from its active concurrency', async () => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn().mockImplementation((url: string) => {
+      if (url === '/api/auth/state')
+        return Promise.resolve(response(authenticated))
+      if (url === '/api/accounts/runtime')
+        return Promise.resolve(
+          response({
+            accounts: [
+              {
+                id: account.id,
+                max_concurrency: 30,
+                in_flight: 0,
+                cooldown_until: 1900000060,
+                reason: 'upstream_error',
+                failures: 3,
+                state: 'cooling',
+                quota_state: 'available',
+              },
+            ],
+            server_time: 1900000000,
+          }),
+        )
+      return Promise.resolve(response({ accounts: [account] }))
+    }),
+  )
+  open()
+  expect(await screen.findByText('Scheduling paused')).toBeTruthy()
+  expect(screen.getByText(/Reason: Upstream unavailable/)).toBeTruthy()
+  expect(screen.getByText(/Concurrent: 0 \/ 30/)).toBeTruthy()
+  expect(screen.getByText(/about 60 seconds/)).toBeTruthy()
+  expect(screen.getByText(/Active requests continue/)).toBeTruthy()
+})
+
 it('identifies an unassigned account and offers pool setup', async () => {
   vi.stubGlobal(
     'fetch',

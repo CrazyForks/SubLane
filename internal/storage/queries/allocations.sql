@@ -68,7 +68,7 @@ WHERE s.id=allocation_entries.scheme_id AND g.tenant_id=sqlc.arg(tenant_id));
 -- A time-zone change reassigns existing requests by their start instant, regardless of their stored original window.
 SELECT CAST(COALESCE(sum(cost),0) AS INTEGER) AS used,CAST(COALESCE(sum(input_tokens+output_tokens),0) AS INTEGER) AS tokens
 FROM allocation_entries WHERE scheme_id=sqlc.arg(scheme_id) AND user_id=sqlc.arg(user_id)
-AND started_at>=sqlc.arg(started_from) AND started_at<sqlc.arg(started_to) AND mode=sqlc.arg(mode);
+AND started_at>=sqlc.arg(started_from) AND started_at<sqlc.arg(started_to) AND mode=sqlc.arg(mode) AND state='settled';
 -- name: AllocationMemberPending :one
 SELECT count(*) FROM allocation_entries WHERE scheme_id=? AND user_id=? AND state='pending';
 -- name: AllocationMemberExposure :one

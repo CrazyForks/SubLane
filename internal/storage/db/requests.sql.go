@@ -243,3 +243,14 @@ func (q *Queries) RecordRequest(ctx context.Context, arg RecordRequestParams) er
 	)
 	return err
 }
+
+const requestRecorded = `-- name: RequestRecorded :one
+SELECT EXISTS(SELECT 1 FROM request_records WHERE request_id=?)
+`
+
+func (q *Queries) RequestRecorded(ctx context.Context, requestID string) (bool, error) {
+	row := q.db.QueryRowContext(ctx, requestRecorded, requestID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}

@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/murongg/SubLane/internal/accounts"
-	"github.com/murongg/SubLane/internal/allocations"
 	"github.com/murongg/SubLane/internal/groups"
 	"github.com/murongg/SubLane/internal/pricing"
 	"github.com/murongg/SubLane/internal/storage/db"
@@ -41,28 +40,31 @@ const (
 func (k Kind) IsGemini() bool { return k == Gemini || k == GeminiStream }
 
 type Service struct {
-	db                *sql.DB
-	queries           *db.Queries
-	accounts          *accounts.Service
-	tenantID          int64
-	provider          *upstream.Client
-	slots             chan struct{}
-	mu                sync.Mutex
-	next              map[string]int
-	health            map[string]*Runtime
-	memberActive      map[int64]int64
-	now               func() time.Time
-	runContext        context.Context
-	stopRuntime       context.CancelFunc
-	workers           sync.WaitGroup
-	closed            bool
-	allocationsReady  bool
-	allocationFailure bool
-	sequence          int64
-	usage             *usageCache
-	catalog           *catalogCache
-	pricing           *pricing.Service
-	timeZone          *timezone.Service
+	db                 *sql.DB
+	queries            *db.Queries
+	accounts           *accounts.Service
+	tenantID           int64
+	provider           *upstream.Client
+	slots              chan struct{}
+	mu                 sync.Mutex
+	next               map[string]int
+	health             map[string]*Runtime
+	memberActive       map[int64]int64
+	waiting            map[int64]int
+	capacityChanged    chan struct{}
+	accountWaitTimeout time.Duration
+	now                func() time.Time
+	runContext         context.Context
+	stopRuntime        context.CancelFunc
+	workers            sync.WaitGroup
+	closed             bool
+	allocationsReady   bool
+	failedSettlements  []*observation
+	sequence           int64
+	usage              *usageCache
+	catalog            *catalogCache
+	pricing            *pricing.Service
+	timeZone           *timezone.Service
 }
 
 func (s *Service) SetTimeZone(zone *timezone.Service) { s.timeZone = zone }
@@ -83,7 +85,7 @@ func NewForTenant(ctx context.Context, connection *sql.DB, accounts *accounts.Se
 	if len(catalogs) > 0 {
 		catalog = catalogs[0]
 	}
-	return &Service{memberActive: make(map[int64]int64), next: make(map[string]int), health: make(map[string]*Runtime), now: time.Now, runContext: runContext, stopRuntime: stopRuntime, db: connection, queries: db.New(connection), accounts: accounts, tenantID: tenantID, provider: provider, slots: make(chan struct{}, 30), usage: newUsageCache(ctx), catalog: newCatalogCache(ctx), pricing: catalog}
+	return &Service{memberActive: make(map[int64]int64), waiting: make(map[int64]int), capacityChanged: make(chan struct{}), accountWaitTimeout: 10 * time.Second, next: make(map[string]int), health: make(map[string]*Runtime), now: time.Now, runContext: runContext, stopRuntime: stopRuntime, db: connection, queries: db.New(connection), accounts: accounts, tenantID: tenantID, provider: provider, slots: make(chan struct{}, 30), usage: newUsageCache(ctx), catalog: newCatalogCache(ctx), pricing: catalog}
 }
 
 func (s *Service) Acquire() (func(), error) {
@@ -177,37 +179,7 @@ func (s *Service) Open(ctx context.Context, userID, groupID int64, raw []byte, h
 	if err := s.warmUsage(ctx, userID, groupID, discoveryProvider); err != nil {
 		return nil, err
 	}
-	s.mu.Lock()
-	if err := s.prepareAllocation(ctx, entry); err != nil {
-		s.mu.Unlock()
-		return nil, err
-	}
-	if err := s.admitMember(ctx, userID); err != nil {
-		s.mu.Unlock()
-		return nil, err
-	}
-	entry.memberLeased = true
-	id, digest, err := s.selectAllocationAccount(ctx, userID, groupID, session, provider, model, kind, entry.schemeID)
-	entry.record.AccountID = id
-	if err == nil && entry.schemeID != 0 {
-		tx, beginErr := s.db.BeginTx(ctx, nil)
-		err = beginErr
-		if err == nil {
-			err = allocations.Begin(ctx, s.queries.WithTx(tx), allocations.Request{ID: entry.record.RequestID, SchemeID: entry.schemeID, UserID: userID, GroupID: groupID, AccountID: id, Model: model, StartedAt: entry.started.Unix()}, s.now().Unix(), s.location())
-			if err == nil {
-				err = tx.Commit()
-			}
-			tx.Rollback()
-		}
-		entry.allocationTracked = err == nil
-	}
-	if err == nil {
-		state := s.health[id]
-		state.InFlight++
-		entry.revision = state.revision
-		entry.leased = true
-	}
-	s.mu.Unlock()
+	id, digest, err := s.leaseAccount(ctx, entry, session, provider, model, kind)
 	if id != "" {
 		if account, lookupErr := s.accounts.Get(ctx, id); lookupErr == nil {
 			entry.record.Provider = account.Provider
@@ -237,17 +209,33 @@ func (s *Service) Open(ctx context.Context, userID, groupID int64, raw []byte, h
 	if err != nil {
 		return nil, err
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	upstreamCtx := ctx
+	var releaseUpstream func()
+	if entry.record.Provider == "codex" && kind != Compact {
+		upstreamCtx, releaseUpstream = drainingUpstreamContext(ctx, s.runContext, canceledStreamDrain)
+		defer func() {
+			if exchange == nil {
+				releaseUpstream()
+			}
+		}()
+	}
 	execute := func(c accounts.Credential) (*upstream.Stream, error) {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if kind.IsGemini() {
-			return s.provider.Gemini(ctx, c, raw, outgoing, kind == GeminiStream)
+			return s.provider.Gemini(upstreamCtx, c, raw, outgoing, kind == GeminiStream)
 		}
 		if kind == Messages {
-			return s.provider.Messages(ctx, c, raw, outgoing)
+			return s.provider.Messages(upstreamCtx, c, raw, outgoing)
 		}
 		if kind == Chat {
-			return s.provider.Chat(ctx, c, raw, outgoing)
+			return s.provider.Chat(upstreamCtx, c, raw, outgoing)
 		}
-		return s.provider.Responses(ctx, c, raw, outgoing, kind == Compact)
+		return s.provider.Responses(upstreamCtx, c, raw, outgoing, kind == Compact)
 	}
 	if entry.record.Provider == "codex" {
 		row, err := s.queries.GetAccountUsage(ctx, id)
@@ -279,7 +267,29 @@ func (s *Service) Open(ctx context.Context, userID, groupID int64, raw []byte, h
 	if result.StatusCode >= 200 && result.StatusCode < 300 {
 		_ = s.accounts.RecordUse(ctx, id, credential.AccessToken, true)
 	}
-	return trackExchange(result, entry), nil
+	return trackExchange(result, entry, upstreamCtx, releaseUpstream), nil
+}
+
+func drainingUpstreamContext(clientCtx, runCtx context.Context, grace time.Duration) (context.Context, func()) {
+	base := context.WithoutCancel(clientCtx)
+	var upstreamCtx context.Context
+	var cancel context.CancelFunc
+	if deadline, ok := clientCtx.Deadline(); ok {
+		upstreamCtx, cancel = context.WithDeadline(base, deadline)
+	} else {
+		upstreamCtx, cancel = context.WithCancel(base)
+	}
+	stopClient := context.AfterFunc(clientCtx, func() {
+		timer := time.NewTimer(grace)
+		defer timer.Stop()
+		select {
+		case <-timer.C:
+			cancel()
+		case <-upstreamCtx.Done():
+		}
+	})
+	stopRuntime := context.AfterFunc(runCtx, cancel)
+	return upstreamCtx, func() { stopClient(); stopRuntime(); cancel() }
 }
 
 // Account reads share the same refresh owner and stale-token rejection rules as forwarding.

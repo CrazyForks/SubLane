@@ -40,6 +40,11 @@ func readEvents(reader io.Reader, yield func([]byte) error) error {
 			return false, ErrResponse
 		}
 		if event.Type == "error" || event.Type == "response.failed" {
+			if event.Type == "response.failed" {
+				if err := yield(raw); err != nil {
+					return false, err
+				}
+			}
 			return false, ErrInterrupted
 		}
 		if event.Type == "response.output_item.done" && len(event.Item) > 0 {

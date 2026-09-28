@@ -626,8 +626,8 @@ it('explains token-share balances without upstream quota settlement', async () =
             pending: 1,
             pending_current: 1,
             in_flight: 0,
-            reserved: 25_000,
-            admission_room: 40_000,
+            reserved: 0,
+            admission_room: 65_000,
             admission: 'active',
             reset_at: 2_000_000_000,
           },
@@ -640,7 +640,11 @@ it('explains token-share balances without upstream quota settlement', async () =
   ).toBeTruthy()
   expect(screen.getByText('0.25 M')).toBeTruthy()
   expect(screen.getByText('Active')).toBeTruthy()
-  expect(screen.getByText(/0 in flight · 1 awaiting usage/)).toBeTruthy()
+  expect(screen.queryByText(/temporarily reserved/)).toBeNull()
+  expect(screen.getByText(/1 awaiting usage this cycle/)).toBeTruthy()
+  expect(
+    screen.getByText(/unconfirmed usage is not charged or reserved/),
+  ).toBeTruthy()
 })
 
 it('shows a risk pause and provisional usage beside positive remaining allowance', async () => {
@@ -679,7 +683,7 @@ it('shows a risk pause and provisional usage beside positive remaining allowance
             pending: 2,
             pending_current: 1,
             in_flight: 1,
-            reserved: 50_000,
+            reserved: 25_000,
             admission_room: 0,
             admission: 'risk_limited',
             reset_at: 2_000_000_000,
@@ -690,8 +694,10 @@ it('shows a risk pause and provisional usage beside positive remaining allowance
   )
   expect(screen.getByText('New requests temporarily paused')).toBeTruthy()
   expect(screen.getByText('0.01 M')).toBeTruthy()
-  expect(screen.getByText(/1 in flight · 1 awaiting usage/)).toBeTruthy()
-  expect(screen.getByText(/0.05 M temporarily reserved/)).toBeTruthy()
+  expect(
+    screen.getByText(/1 in flight · 0.025 M temporarily reserved/),
+  ).toBeTruthy()
+  expect(screen.getByText(/1 awaiting usage this cycle/)).toBeTruthy()
   expect(screen.getByText(/Admission headroom: 0 M/)).toBeTruthy()
   expect(screen.getByText(/Older pending requests: 1/)).toBeTruthy()
 })

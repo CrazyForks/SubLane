@@ -162,17 +162,25 @@ export function AllocationBalances({ detail }: { detail: AllocationDetail }) {
                       {(window.in_flight > 0 || window.pending_current > 0) &&
                         window.admission !== 'unlimited' && (
                           <div className="space-y-1 text-sm leading-6 text-muted-foreground">
-                            <p>
-                              {t('allocationRiskExposure', {
-                                inFlight: window.in_flight,
-                                pending: window.pending_current,
-                                reserved: allocationValue(
-                                  window.reserved,
-                                  window.mode,
-                                ),
-                                unit,
-                              })}
-                            </p>
+                            {window.in_flight > 0 && (
+                              <p>
+                                {t('allocationRiskExposure', {
+                                  inFlight: window.in_flight,
+                                  reserved: allocationValue(
+                                    window.reserved,
+                                    window.mode,
+                                  ),
+                                  unit,
+                                })}
+                              </p>
+                            )}
+                            {window.pending_current > 0 && (
+                              <p>
+                                {t('allocationPendingCurrent', {
+                                  pending: window.pending_current,
+                                })}
+                              </p>
+                            )}
                             <p>
                               {t('allocationAdmissionRoom', {
                                 room: allocationValue(

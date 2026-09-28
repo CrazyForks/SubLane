@@ -81,8 +81,6 @@ func rateFor(rev Revision, model string) (Rate, error) {
 	return Rate{}, ErrUnpriced
 }
 
-// Bound unmetered requests per member and period without adding another allocation setting.
-const maxPendingRiskRequests = 2
 const maxOutstandingRiskRequests = 4
 
 type riskBudget struct {
@@ -91,16 +89,15 @@ type riskBudget struct {
 	limited  bool
 }
 
-func currentRiskBudget(used, limit, active, pending int64) riskBudget {
+func currentRiskBudget(used, limit, active int64) riskBudget {
 	perRequest := max(int64(1), (limit+9)/10)
-	outstanding := active + pending
-	reserved := outstanding * perRequest
+	reserved := active * perRequest
 	// The buffer is shared headroom; admitting another request still needs one full reservation.
 	room := max(int64(0), limit+perRequest-used-reserved)
 	return riskBudget{
 		reserved: reserved,
 		room:     room,
-		limited:  pending >= maxPendingRiskRequests || outstanding >= maxOutstandingRiskRequests || room < perRequest,
+		limited:  active >= maxOutstandingRiskRequests || room < perRequest,
 	}
 }
 
@@ -140,7 +137,7 @@ func readMemberWindow(ctx context.Context, q *db.Queries, scheme, user int64, me
 	unlimited := config.Mode == "windows" && limit == 0
 	risk := riskBudget{}
 	if !unlimited {
-		risk = currentRiskBudget(usage.Used, limit, exposure.Active, exposure.Pending)
+		risk = currentRiskBudget(usage.Used, limit, exposure.Active)
 	}
 	return memberWindowUsage{
 		window: window, limit: limit, unlimited: unlimited, used: usage.Used, tokens: usage.Tokens,
@@ -248,6 +245,10 @@ func Finish(ctx context.Context, q *db.Queries, id string, c Completion, now int
 		if err != nil {
 			return err
 		}
+	}
+	if state == "pending" {
+		// Partial observations remain available for correction but are not a charge.
+		cost = 0
 	}
 	return q.FinishAllocationEntry(ctx, db.FinishAllocationEntryParams{RequestID: id, FinishedAt: now, State: state, InputTokens: c.Input, OutputTokens: c.Output, CachedTokens: c.Cached, Cost: cost, Manual: bit(manual)})
 }

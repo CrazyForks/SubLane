@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
@@ -29,7 +29,7 @@ import { DeleteAccount } from '@/components/DeleteAccount'
 import { Status } from '@/components/Status'
 import { AccountLimits } from '@/components/AccountLimits'
 import { AccountProxy } from '@/components/AccountProxy'
-import { runtimeOptions } from '@/lib/runtime'
+import { reasonKeys, runtimeOptions } from '@/lib/runtime'
 import { proxyOptions } from '@/lib/proxies'
 import { ProviderLogo } from '@/components/ProviderLogo'
 import { Button } from '@/components/ui/Button'
@@ -53,6 +53,7 @@ export function Accounts() {
       query.data?.accounts.some((account) => account.proxy_id !== '') ?? false,
   })
   const runtime = useQuery(runtimeOptions)
+  const [clock, setClock] = useState(() => Date.now())
   const [limits, setLimits] = useState<Account | null>(null)
   const [proxyAccount, setProxyAccount] = useState<Account | null>(null)
   const [connecting, setConnecting] = useState<Account | 'new' | null>(null)
@@ -61,6 +62,19 @@ export function Accounts() {
     name: string
     count: number
   } | null>(null)
+  const cooling =
+    runtime.data?.accounts.some((state) => state.state === 'cooling') ?? false
+  useEffect(() => {
+    const timer = window.setInterval(
+      () => setClock(Date.now()),
+      cooling ? 1000 : 30_000,
+    )
+    return () => window.clearInterval(timer)
+  }, [cooling])
+  const runtimeNow = runtime.data
+    ? runtime.data.server_time * 1000 +
+      Math.max(0, clock - runtime.dataUpdatedAt)
+    : clock
   const heading = useRef<HTMLHeadingElement>(null)
   const invalidate = async () => {
     await Promise.all([
@@ -370,13 +384,29 @@ export function Accounts() {
                                   </p>
                                 )}
                                 {state.state === 'cooling' && (
-                                  <p className="text-xs leading-5">
-                                    {t('accountRetryAt', {
-                                      time: dates.format(
-                                        state.cooldown_until * 1000,
-                                      ),
-                                    })}
-                                  </p>
+                                  <div className="space-y-1 text-xs leading-5">
+                                    <p>
+                                      {t('accountCoolingReason', {
+                                        reason: t(
+                                          reasonKeys[state.reason] ??
+                                            'reasonUnknown',
+                                        ),
+                                      })}
+                                    </p>
+                                    <p>
+                                      {t('accountRetryAt', {
+                                        time: dates.format(
+                                          state.cooldown_until * 1000,
+                                        ),
+                                        seconds: Math.max(
+                                          0,
+                                          state.cooldown_until -
+                                            Math.floor(runtimeNow / 1000),
+                                        ),
+                                      })}
+                                    </p>
+                                    <p>{t('accountCoolingHint')}</p>
+                                  </div>
                                 )}
                               </>
                             )}

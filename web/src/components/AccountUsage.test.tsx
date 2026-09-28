@@ -11,6 +11,7 @@ const metadata = {
   stale: false,
   refreshing: false,
   refresh_failed: false,
+  refresh_error: '',
   retry_after_seconds: 0,
 }
 const snapshot = {
@@ -68,7 +69,9 @@ it('loads actual quota windows and refreshes without confusing failure with exha
       name: 'Refresh usage for Test subscription',
     }),
   )
-  await screen.findByText('Unable to refresh. Showing the last known usage.')
+  await screen.findByText(
+    'Refresh failed: upstream service is unavailable. Showing the last known usage.',
+  )
   expect(screen.getByText('75% remaining')).toBeTruthy()
   expect(fetch).toHaveBeenCalledTimes(2)
   expect(fetch.mock.calls[1][0]).toBe(
@@ -158,7 +161,9 @@ it('shows a recoverable error when the initial request fails', async () => {
       ),
   )
   mount()
-  await screen.findByText('Unable to load usage. Try refreshing later.')
+  await screen.findByText(
+    'Unable to load usage: upstream rate limited. Try refreshing later.',
+  )
   expect(screen.queryByRole('progressbar')).toBeNull()
 })
 it('does not infer renewed quota after a reset time passes and respects upstream restrictions', async () => {
@@ -275,19 +280,47 @@ it('shows server-side refresh failure with the persisted snapshot', async () => 
           stale: true,
           refreshing: false,
           refresh_failed: true,
+          refresh_error: 'upstream_unavailable',
           retry_after_seconds: 30,
         }),
       ),
     ),
   )
   mount()
-  await screen.findByText('Unable to refresh. Showing the last known usage.')
+  await screen.findByText(
+    'Refresh failed: upstream service is unavailable. Showing the last known usage.',
+  )
   expect(screen.getByText('75% remaining')).toBeTruthy()
   expect(
     screen
       .getByRole('button', { name: 'Refresh usage for Test subscription' })
       .hasAttribute('disabled'),
   ).toBe(true)
+})
+
+it('explains a rate-limited refresh without exposing upstream details', async () => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          ...snapshot,
+          server_time: now,
+          expires_at: now + 120,
+          stale: true,
+          refreshing: false,
+          refresh_failed: true,
+          refresh_error: 'rate_limited',
+          retry_after_seconds: 30,
+        }),
+      ),
+    ),
+  )
+  mount()
+  await screen.findByText(
+    'Refresh failed: upstream rate limited. Showing the last known usage.',
+  )
+  expect(screen.queryByText(/private|token|http/)).toBeNull()
 })
 
 it('allows retry if the connection is lost while waiting for a background refresh', async () => {
@@ -309,7 +342,7 @@ it('allows retry if the connection is lost while waiting for a background refres
   mount()
   await screen.findByText('Cached usage is outdated. Refreshing…')
   await screen.findByText(
-    'Unable to refresh. Showing the last known usage.',
+    'Refresh failed: upstream service is unavailable. Showing the last known usage.',
     {},
     { timeout: 2500 },
   )

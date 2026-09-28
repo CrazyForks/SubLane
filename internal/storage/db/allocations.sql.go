@@ -73,7 +73,7 @@ func (q *Queries) AllocationMemberPending(ctx context.Context, arg AllocationMem
 const allocationMemberUsage = `-- name: AllocationMemberUsage :one
 SELECT CAST(COALESCE(sum(cost),0) AS INTEGER) AS used,CAST(COALESCE(sum(input_tokens+output_tokens),0) AS INTEGER) AS tokens
 FROM allocation_entries WHERE scheme_id=?1 AND user_id=?2
-AND started_at>=?3 AND started_at<?4 AND mode=?5
+AND started_at>=?3 AND started_at<?4 AND mode=?5 AND state='settled'
 `
 
 type AllocationMemberUsageParams struct {

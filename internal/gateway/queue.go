@@ -1,0 +1,159 @@
+package gateway
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"time"
+
+	"github.com/murongg/SubLane/internal/allocations"
+	"github.com/murongg/SubLane/internal/groups"
+	"github.com/murongg/SubLane/internal/storage/db"
+)
+
+const maxAccountWaiting = 8
+
+type accountWaitError string
+
+func (e accountWaitError) Error() string { return string(e) }
+func (e accountWaitError) Unwrap() error { return ErrAccountBusy }
+
+var (
+	ErrAccountQueueFull   = accountWaitError("account_queue_full")
+	ErrAccountWaitTimeout = accountWaitError("account_wait_timeout")
+)
+
+// Selection and leasing share the admission lock, but waiting holds neither a lock nor a transaction.
+func (s *Service) leaseAccount(ctx context.Context, entry *observation, session, provider, model string, kind Kind) (id string, digest [32]byte, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var timer *time.Timer
+	var retry *time.Ticker
+	var deadline time.Time
+	admissionCtx := ctx
+	defer func() {
+		if timer != nil {
+			if ctx.Err() != nil {
+				err = ctx.Err()
+			} else if err != nil && errors.Is(admissionCtx.Err(), context.DeadlineExceeded) {
+				err = ErrAccountWaitTimeout
+			}
+			timer.Stop()
+			retry.Stop()
+			s.waiting[entry.record.GroupID]--
+			if s.waiting[entry.record.GroupID] == 0 {
+				delete(s.waiting, entry.record.GroupID)
+			}
+		}
+	}()
+	for {
+		if err := ctx.Err(); err != nil {
+			return id, digest, err
+		}
+		if s.closed {
+			return id, digest, context.Canceled
+		}
+		if timer != nil && !time.Now().Before(deadline) {
+			return id, digest, ErrAccountWaitTimeout
+		}
+		if err := s.prepareAllocation(admissionCtx, entry); err != nil {
+			return id, digest, err
+		}
+		if !entry.memberLeased {
+			if err := s.admitMember(admissionCtx, entry.record.UserID); err != nil {
+				return id, digest, err
+			}
+			entry.memberLeased = true
+		} else if err := s.recheckWaitingMember(admissionCtx, entry); err != nil {
+			return id, digest, err
+		}
+		id, digest, err = s.selectAllocationAccount(admissionCtx, entry.record.UserID, entry.record.GroupID, session, provider, model, kind, entry.schemeID)
+		entry.record.AccountID = id
+		if err != ErrAccountBusy {
+			break
+		}
+		if timer == nil {
+			if s.waiting[entry.record.GroupID] >= maxAccountWaiting {
+				return id, digest, ErrAccountQueueFull
+			}
+			s.waiting[entry.record.GroupID]++
+			deadline = time.Now().Add(s.accountWaitTimeout)
+			waitingCtx, stopWaiting := context.WithDeadline(ctx, deadline)
+			defer stopWaiting()
+			admissionCtx = waitingCtx
+			timer = time.NewTimer(s.accountWaitTimeout)
+			// Lifecycle/policy edits happen outside the gateway lock. Recheck them even without a lease release.
+			retry = time.NewTicker(250 * time.Millisecond)
+		}
+		changed := s.capacityChanged
+		s.mu.Unlock()
+		select {
+		case <-ctx.Done():
+		case <-timer.C:
+		case <-retry.C:
+		case <-changed:
+		}
+		s.mu.Lock()
+	}
+	if err != nil {
+		return id, digest, err
+	}
+	if err := admissionCtx.Err(); err != nil {
+		return id, digest, err
+	}
+	if entry.schemeID != 0 {
+		tx, beginErr := s.db.BeginTx(admissionCtx, nil)
+		if beginErr != nil {
+			return id, digest, beginErr
+		}
+		defer tx.Rollback()
+		if err := allocations.Begin(admissionCtx, s.queries.WithTx(tx), allocations.Request{ID: entry.record.RequestID, SchemeID: entry.schemeID, UserID: entry.record.UserID, GroupID: entry.record.GroupID, AccountID: id, Model: model, StartedAt: entry.started.Unix()}, s.now().Unix(), s.location()); err != nil {
+			return id, digest, err
+		}
+		if err := tx.Commit(); err != nil {
+			return id, digest, err
+		}
+		entry.allocationTracked = true
+	}
+	state := s.health[id]
+	state.InFlight++
+	// Arrival can precede a failure while queued; only an admitted request may count as its recovery.
+	s.sequence++
+	entry.sequence = s.sequence
+	entry.revision = state.revision
+	entry.leased = true
+	return id, digest, nil
+}
+
+func (s *Service) recheckWaitingMember(ctx context.Context, entry *observation) error {
+	policy, err := s.queries.GetMemberLimits(ctx, db.GetMemberLimitsParams{TenantID: s.tenantID, UserID: entry.record.UserID})
+	if errors.Is(err, sql.ErrNoRows) || err == nil && !policy.Enabled {
+		return groups.ErrUnavailable
+	}
+	if err != nil {
+		return err
+	}
+	// The waiting request already owns a member lease and consumes RPM only once.
+	if policy.MaxConcurrency > 0 && s.memberActive[entry.record.UserID] > policy.MaxConcurrency {
+		return ErrMemberBusy
+	}
+	if entry.record.KeyID != 0 {
+		key, err := s.queries.GetKey(ctx, db.GetKeyParams{ID: entry.record.KeyID, UserID: entry.record.UserID, TenantID: s.tenantID})
+		if errors.Is(err, sql.ErrNoRows) {
+			return groups.ErrUnavailable
+		}
+		if err != nil {
+			return err
+		}
+		if !key.Enabled || key.RevokedAt != nil || key.ExpiresAt != nil && *key.ExpiresAt <= s.now().Unix() || key.GroupID != entry.record.GroupID {
+			return groups.ErrUnavailable
+		}
+	}
+	return nil
+}
+
+// Call under s.mu after accounting commits, so awakened requests see the final charge.
+func (s *Service) notifyCapacity() {
+	close(s.capacityChanged)
+	s.capacityChanged = make(chan struct{})
+}

@@ -151,10 +151,12 @@ export const en = {
     'Usage changed or the correction conflicts with a previous settlement. Refresh before retrying.',
   allocationPending: 'Usage pending reconciliation',
   allocationRiskLimit:
-    'Current requests reserve capacity until their usage is known. Retry after one finishes, or ask an administrator to correct pending usage.',
+    'Too many requests are in flight or admission headroom is low. Retry when an ongoing request finishes. Pending usage does not pause admission.',
   allocationRiskPaused: 'New requests temporarily paused',
   allocationRiskExposure:
-    'This cycle: {{inFlight}} in flight · {{pending}} awaiting usage · {{reserved}} {{unit}} temporarily reserved',
+    'This cycle: {{inFlight}} in flight · {{reserved}} {{unit}} temporarily reserved',
+  allocationPendingCurrent:
+    '{{pending}} awaiting usage this cycle; unconfirmed usage is not charged or reserved.',
   allocationAdmissionRoom:
     'Admission headroom: {{room}} {{unit}} (includes a temporary buffer, not added allowance).',
   allocationOlderPending:
@@ -936,8 +938,18 @@ export const en = {
   refreshUsage: 'Refresh usage',
   usageLoading: 'Loading usage…',
   usageUpdated: 'Updated {{time}}',
-  usageStale: 'Unable to refresh. Showing the last known usage.',
-  usageLoadFailed: 'Unable to load usage. Try refreshing later.',
+  usageStale: 'Refresh failed: {{reason}}. Showing the last known usage.',
+  usageLoadFailed: 'Unable to load usage: {{reason}}. Try refreshing later.',
+  usageReasonRateLimited: 'upstream rate limited',
+  usageReasonReauthorize: 'credentials need reauthorization',
+  usageReasonCredentialRefresh: 'credential refresh failed',
+  usageReasonUnsupported: 'usage is not supported by this provider',
+  usageReasonInvalidResponse: 'upstream returned invalid data',
+  usageReasonUpstreamRejected: 'upstream rejected the request',
+  usageReasonTimeout: 'the request timed out',
+  usageReasonUpstreamUnavailable: 'upstream service is unavailable',
+  usageReasonBusy: 'the system is busy',
+  usageReasonUnknown: 'unknown reason',
   usageNotReported: 'No usage limits reported',
   usageResetCredits: 'Reset cards: {{count}}',
   usageResetCreditsUnknown: 'Unknown',
@@ -1018,7 +1030,7 @@ export const en = {
   accountScheduling: 'Scheduling settings',
   accountConcurrencyLimit: 'Concurrent model requests',
   accountConcurrencyHint:
-    'Allow 1–30 active model requests for this account across all pools. New accounts default to 30; existing account settings stay unchanged. Lowering the limit lets existing requests finish.',
+    'Allow 1–30 active model requests for this account across all pools. New accounts default to 30; existing account settings stay unchanged. When full, new requests wait up to 10 seconds, with at most 8 waiting per pool. Lowering the limit lets existing requests finish.',
   accountConcurrencyInvalid: 'Enter a whole number from 1 to 30.',
   lastAccountFailure: 'Last scheduling failure',
   resumeAccountHint:
@@ -1029,10 +1041,14 @@ export const en = {
   saveAccountScheduling: 'Save settings',
   runtimeLoadFailed: 'Scheduling status is temporarily unavailable.',
   accountInFlight: 'Concurrent: {{active}} / {{limit}}',
-  accountCooling: 'Cooling down',
+  accountCooling: 'Scheduling paused',
+  accountCoolingReason: 'Reason: {{reason}}',
+  accountCoolingHint:
+    'Active requests continue. New requests use another account when possible and retry this account after the safety window.',
   accountProbing: 'Recovering',
   accountRetryReady: 'Ready to retry',
-  accountRetryAt: 'Retry after {{time}}',
+  accountRetryAt:
+    'Retry after {{time}} (about {{seconds}} seconds); this is a local safety window, not a provider recovery guarantee.',
   requests: 'Requests',
   allRequests: 'All requests',
   yourRequests: 'Your requests',
@@ -1077,6 +1093,8 @@ export const en = {
   reasonInterrupted: 'Stream interrupted',
   reasonCanceled: 'Client disconnected',
   reasonAccountBusy: 'Account at capacity',
+  reasonAccountQueueFull: 'Account waiting queue is full',
+  reasonAccountWaitTimeout: 'Timed out waiting for account capacity',
   reasonCooling: 'Account cooling down',
   reasonAccountUnavailable: 'Account unavailable',
   reasonGroupUnavailable: 'Pool access unavailable',

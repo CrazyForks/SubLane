@@ -356,8 +356,8 @@ func TestRatioTokenBudgetChargesReportedTokensWithoutQuotaSnapshot(t *testing.T)
 	if err := Finish(ctx, q, request.ID, Completion{Dispatched: true}, now*1000, false); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Check(ctx, q, scheme.ID, user, 2, account, "synthetic", now, time.UTC); !errors.Is(err, ErrRisk) {
-		t.Fatal("unsettled risk limit was not enforced", err)
+	if _, err := Check(ctx, q, scheme.ID, user, 2, account, "synthetic", now, time.UTC); err != nil {
+		t.Fatal("two unknown requests exhausted a still-usable allowance", err)
 	}
 	now = time.Date(2030, 6, 1, 0, 0, 0, 0, time.UTC).Unix()
 	if _, err := Check(ctx, q, scheme.ID, user, 2, account, "synthetic", now, time.UTC); err != nil {
@@ -1021,7 +1021,7 @@ func TestAccountingIsolationPendingRecoveryAndRollover(t *testing.T) {
 	}
 	if detail, err := s.Detail(ctx, scheme.ID, user); err != nil {
 		t.Fatal(err)
-	} else if balance := detail.Balances[0]; balance.Pending != 1 || balance.PendingCurrent != 1 || balance.Reserved != 1 || balance.Admission != "active" {
+	} else if balance := detail.Balances[0]; balance.Pending != 1 || balance.PendingCurrent != 1 || balance.Reserved != 0 || balance.Admission != "active" {
 		t.Fatal("current-cycle pending exposure was not reported", balance)
 	}
 	now += 86400
@@ -1109,6 +1109,79 @@ func TestUnsettledRequestCountHasAutomaticBound(t *testing.T) {
 		t.Fatal(err)
 	} else if balance := detail.Balances[0]; balance.InFlight != 4 || balance.AdmissionRoom != 700 || balance.Admission != "risk_limited" {
 		t.Fatal("balance missed the unsettled-request count cap", balance)
+	}
+}
+
+func TestPendingUsageDoesNotReserveAdmissionAfterRequestEnds(t *testing.T) {
+	s, conn, user, account := fixture(t)
+	ctx := context.Background()
+	now := time.Date(2030, 4, 15, 12, 0, 0, 0, time.UTC).Unix()
+	s.now = func() time.Time { return unix(now) }
+	scheme, err := s.SaveScheme(ctx, 0, SchemeInput{Name: "Synthetic post-use accounting", GroupID: 2, Enabled: true, Config: Config{Mode: "tokens", Period: "day", Members: []Share{{UserID: user, Limit: 1000}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := db.New(conn)
+	for i := range 4 {
+		id := fmt.Sprintf("synthetic-pending-%d", i)
+		r := Request{ID: id, SchemeID: scheme.ID, UserID: user, GroupID: 2, AccountID: account, Model: "synthetic", StartedAt: now}
+		if err := Begin(ctx, q, r, now, time.UTC); err != nil {
+			t.Fatal(err)
+		}
+		if err := Finish(ctx, q, id, Completion{Dispatched: true}, now*1000, false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := Check(ctx, q, scheme.ID, user, 2, account, "synthetic", now, time.UTC); err != nil {
+		t.Fatal("finished requests with unknown usage blocked admission", err)
+	}
+	detail, err := s.Detail(ctx, scheme.ID, user)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(detail.Pending) != 4 || detail.Balances[0].PendingCurrent != 4 || detail.Balances[0].Reserved != 0 || detail.Balances[0].Admission != "active" {
+		t.Fatal("pending usage still reserved capacity or disappeared", detail.Balances, detail.Pending)
+	}
+}
+
+func TestPartialPendingUsageDoesNotChargeUntilConfirmed(t *testing.T) {
+	s, conn, user, account := fixture(t)
+	ctx := context.Background()
+	now := time.Date(2030, 4, 15, 12, 0, 0, 0, time.UTC).Unix()
+	s.now = func() time.Time { return unix(now) }
+	scheme, err := s.SaveScheme(ctx, 0, SchemeInput{Name: "Synthetic partial pending", GroupID: 2, Enabled: true, Config: Config{Mode: "tokens", Period: "day", Members: []Share{{UserID: user, Limit: 5}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := db.New(conn)
+	request := Request{ID: "synthetic-partial", SchemeID: scheme.ID, UserID: user, GroupID: 2, AccountID: account, Model: "synthetic", StartedAt: now}
+	if err := Begin(ctx, q, request, now, time.UTC); err != nil {
+		t.Fatal(err)
+	}
+	if err := Finish(ctx, q, request.ID, Completion{Input: 5, Dispatched: true}, now*1000, false); err != nil {
+		t.Fatal(err)
+	}
+	assertPendingDoesNotCharge := func() {
+		t.Helper()
+		if _, err := Check(ctx, q, scheme.ID, user, 2, account, request.Model, now, time.UTC); err != nil {
+			t.Fatal("partial pending usage blocked admission", err)
+		}
+		detail, err := s.Detail(ctx, scheme.ID, user)
+		if err != nil || len(detail.Pending) != 1 || detail.Pending[0].Input != 5 || detail.Balances[0].Used != 0 {
+			t.Fatal("pending observations changed the charged balance", detail, err)
+		}
+	}
+	assertPendingDoesNotCharge()
+	// Existing databases can contain a nonzero cost on pending entries.
+	if _, err := conn.ExecContext(ctx, "UPDATE allocation_entries SET cost=5 WHERE request_id=?", request.ID); err != nil {
+		t.Fatal(err)
+	}
+	assertPendingDoesNotCharge()
+	if err := s.Settle(ctx, scheme.ID, request.ID, Completion{Input: 5}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Check(ctx, q, scheme.ID, user, 2, account, request.Model, now, time.UTC); !errors.Is(err, ErrQuota) {
+		t.Fatal("confirmed usage was not charged", err)
 	}
 }
 
@@ -1247,8 +1320,8 @@ func TestWindowedAmountPendingExposureFollowsEachWindow(t *testing.T) {
 	if err != nil || len(detail.Balances) != 2 {
 		t.Fatal(err, detail.Balances)
 	}
-	if detail.Balances[0].PendingCurrent != 0 || detail.Balances[0].Reserved != 0 || detail.Balances[1].PendingCurrent != 1 || detail.Balances[1].Reserved != 20 {
-		t.Fatal("five-hour rollover erased weekly pending exposure", detail.Balances)
+	if detail.Balances[0].PendingCurrent != 0 || detail.Balances[0].Reserved != 0 || detail.Balances[1].PendingCurrent != 1 || detail.Balances[1].Reserved != 0 {
+		t.Fatal("weekly pending usage reserved capacity or disappeared", detail.Balances)
 	}
 	if _, err := Check(ctx, q, scheme.ID, user, 2, account, "synthetic", now, time.UTC); err != nil {
 		t.Fatal("one weekly pending request froze both windows", err)

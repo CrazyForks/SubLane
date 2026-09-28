@@ -143,10 +143,12 @@ export const zh: Record<keyof typeof en, string> = {
     '用量已变化，或修正与此前结算冲突，请刷新后重试。',
   allocationPending: '用量待对账',
   allocationRiskLimit:
-    '当前请求的用量未确定，系统会暂占额度。请等已有请求结束后重试；待处理用量可请管理员修正。',
+    '进行中的请求较多或放行余量不足，请等进行中的请求结束后重试。待确认用量不会导致暂缓放行。',
   allocationRiskPaused: '新请求暂缓',
   allocationRiskExposure:
-    '本周期：{{inFlight}} 个进行中 · {{pending}} 个待确认用量 · 暂占 {{reserved}} {{unit}}',
+    '本周期：{{inFlight}} 个进行中 · 暂占 {{reserved}} {{unit}}',
+  allocationPendingCurrent:
+    '本周期有 {{pending}} 条待确认用量；未核实前不扣账，也不暂占额度。',
   allocationAdmissionRoom:
     '放行余量：{{room}} {{unit}}（含临时缓冲，不是额外额度）',
   allocationOlderPending:
@@ -843,8 +845,18 @@ export const zh: Record<keyof typeof en, string> = {
   refreshUsage: '刷新额度',
   usageLoading: '正在获取额度…',
   usageUpdated: '更新于 {{time}}',
-  usageStale: '刷新失败，当前显示上次获取的额度。',
-  usageLoadFailed: '暂时无法获取额度，请稍后刷新。',
+  usageStale: '刷新失败：{{reason}}，当前显示上次获取的额度。',
+  usageLoadFailed: '暂时无法获取额度：{{reason}}。请稍后刷新。',
+  usageReasonRateLimited: '上游限流',
+  usageReasonReauthorize: '凭据需要重新授权',
+  usageReasonCredentialRefresh: '凭据刷新失败',
+  usageReasonUnsupported: '该服务商不支持额度查询',
+  usageReasonInvalidResponse: '上游返回了无效数据',
+  usageReasonUpstreamRejected: '上游拒绝了请求',
+  usageReasonTimeout: '请求超时',
+  usageReasonUpstreamUnavailable: '上游服务暂时不可用',
+  usageReasonBusy: '系统正忙',
+  usageReasonUnknown: '未知原因',
   usageNotReported: '上游未提供额度信息',
   usageResetCredits: '重置卡：{{count}}',
   usageResetCreditsUnknown: '未知',
@@ -918,7 +930,7 @@ export const zh: Record<keyof typeof en, string> = {
   accountScheduling: '调度设置',
   accountConcurrencyLimit: '模型请求并发上限',
   accountConcurrencyHint:
-    '允许此账号在所有账号池合计处理 1～30 个模型请求。新账号默认 30，已有账号的设置保持不变。降低上限不会中断正在执行的请求。',
+    '允许此账号在所有账号池合计处理 1～30 个模型请求。新账号默认 30，已有账号的设置保持不变。满载时新请求最多等待 10 秒，每个账号池最多等待 8 个请求。降低上限不会中断正在执行的请求。',
   accountConcurrencyInvalid: '请输入 1～30 之间的整数。',
   lastAccountFailure: '最近调度失败',
   resumeAccountHint:
@@ -929,10 +941,14 @@ export const zh: Record<keyof typeof en, string> = {
   saveAccountScheduling: '保存设置',
   runtimeLoadFailed: '暂时无法获取账号调度状态。',
   accountInFlight: '并发：{{active}} / {{limit}}',
-  accountCooling: '冷却中',
+  accountCooling: '暂缓调度',
+  accountCoolingReason: '原因：{{reason}}',
+  accountCoolingHint:
+    '正在执行的请求不会中断。新请求会优先使用其他可用账号，并在保护窗口结束后重试此账号。',
   accountProbing: '恢复中',
   accountRetryReady: '可重试',
-  accountRetryAt: '可重试时间：{{time}}',
+  accountRetryAt:
+    '可重试时间：{{time}}（约 {{seconds}} 秒后）；这是本地保护窗口结束时间，不代表服务商一定恢复。',
   requests: '请求记录',
   allRequests: '全部请求',
   yourRequests: '我的请求记录',
@@ -975,6 +991,8 @@ export const zh: Record<keyof typeof en, string> = {
   reasonInterrupted: '响应流中断',
   reasonCanceled: '客户端已断开',
   reasonAccountBusy: '账号并发已满',
+  reasonAccountQueueFull: '账号等待队列已满',
+  reasonAccountWaitTimeout: '等待账号空位超时',
   reasonCooling: '账号正在冷却',
   reasonAccountUnavailable: '账号不可用',
   reasonGroupUnavailable: '账号池权限不可用',

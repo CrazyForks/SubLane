@@ -158,7 +158,7 @@ func TestUsageRefreshFailurePreservesSnapshotAndBacksOff(t *testing.T) {
 	f.clock.Add(6)
 	f.fail.Store(true)
 	failed := waitQuota(t, f)
-	if !failed.RefreshFailed || !failed.Stale || failed.UpdatedAt != first.UpdatedAt || failed.RetryAfterSeconds <= 0 {
+	if !failed.RefreshFailed || failed.RefreshError != "upstream_unavailable" || !failed.Stale || failed.UpdatedAt != first.UpdatedAt || failed.RetryAfterSeconds <= 0 {
 		t.Fatal("failed refresh discarded last good snapshot", failed)
 	}
 	waitQuota(t, f)
@@ -169,6 +169,29 @@ func TestUsageRefreshFailurePreservesSnapshotAndBacksOff(t *testing.T) {
 	f.fail.Store(false)
 	if value := waitQuota(t, f); value.Stale || value.RefreshFailed || value.UpdatedAt <= first.UpdatedAt {
 		t.Fatal("recovery failed", value)
+	}
+}
+
+func TestUsageRefreshErrorCodeClassifiesSafeReasons(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{name: "rate limited", err: &upstream.UpstreamError{Status: 429}, want: "rate_limited"},
+		{name: "reauthorization", err: accounts.ErrReauthorize, want: "reauthorization_required"},
+		{name: "credential refresh", err: accounts.ErrRefresh, want: "credential_refresh_failed"},
+		{name: "unsupported", err: upstream.ErrUsageUnsupported, want: "provider_usage_unsupported"},
+		{name: "response", err: upstream.ErrResponse, want: "invalid_upstream_response"},
+		{name: "upstream", err: upstream.ErrUpstream, want: "upstream_unavailable"},
+		{name: "unknown", err: errors.New("synthetic failure"), want: "refresh_failed"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := usageRefreshError(tt.err); got != tt.want {
+				t.Fatalf("usageRefreshError(%v) = %q, want %q", tt.err, got, tt.want)
+			}
+		})
 	}
 }
 func TestUsageCacheCannotBypassAccountDisableOrDeletion(t *testing.T) {

@@ -125,6 +125,7 @@ func (s *Service) SetConcurrency(ctx context.Context, id string, limit int64) er
 	if state := s.health[id]; state != nil {
 		state.MaxConcurrency = limit
 	}
+	s.notifyCapacity()
 	return nil
 }
 func (s *Service) Resume(ctx context.Context, id string) error {
