@@ -1041,6 +1041,9 @@ export const en = {
   requestResult: 'Result',
   requestDuration: 'Duration',
   requestTokens: 'Tokens (in / out)',
+  requestEstimatedCost: 'Estimated cost (USD)',
+  requestEstimatedCostHint:
+    'Calculated from reported tokens and current model prices, including cached input pricing. This is a reference estimate, not a billed amount or an allowance debit. Missing usage or prices show —.',
   requestCachedTokens: 'Cached: {{count}}',
   requestCacheHitRate: 'Hit rate: {{rate}}',
   requestCacheHitRateHint:

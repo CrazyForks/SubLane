@@ -4,6 +4,17 @@ import { authKey, type AuthState } from './auth'
 import { request } from './request'
 import { providers } from './accounts'
 
+export function formatRequestCost(value: number | null, language: string) {
+  return value === null
+    ? '—'
+    : new Intl.NumberFormat(language, {
+        style: 'currency',
+        currency: 'USD',
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 6,
+      }).format(value / 1_000_000)
+}
+
 export function cacheHitRate(input: number | null, cached: number | null) {
   // Missing or inconsistent usage must not look like a cache miss or a 100% hit.
   if (
@@ -53,6 +64,12 @@ const recordSchema = z.object({
   input_tokens: tokens,
   output_tokens: tokens,
   cached_tokens: tokens,
+  estimated_cost_micro_usd: z
+    .number()
+    .int()
+    .nonnegative()
+    .nullable()
+    .default(null),
   username: z.string(),
   key_name: z.string(),
   group_name: z.string(),

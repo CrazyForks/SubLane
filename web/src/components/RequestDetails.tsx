@@ -1,6 +1,6 @@
 import { useTranslation } from 'react-i18next'
 import type { RequestRecord } from '@/lib/requests'
-import { outcomeKeys } from '@/lib/requests'
+import { outcomeKeys, formatRequestCost } from '@/lib/requests'
 import { reasonKeys } from '@/lib/runtime'
 import { RequestID } from './RequestID'
 import {
@@ -50,6 +50,13 @@ export function RequestDetails({
     [t('requestUpstreamStatus'), value.upstream_status?.toString() ?? '—'],
     [t('requestDuration'), ms(value.duration_ms)],
     [t('requestFirstToken'), ms(value.first_token_ms)],
+    [
+      t('requestEstimatedCost'),
+      formatRequestCost(
+        value.estimated_cost_micro_usd,
+        i18n.resolvedLanguage ?? 'en',
+      ),
+    ],
   ]
   return (
     <Dialog
@@ -86,6 +93,9 @@ export function RequestDetails({
         </dl>
         <p className="text-xs leading-5 text-muted-foreground">
           {t('requestFirstTokenHint')}
+        </p>
+        <p className="text-xs leading-5 text-muted-foreground">
+          {t('requestEstimatedCostHint')}
         </p>
       </DialogContent>
     </Dialog>
