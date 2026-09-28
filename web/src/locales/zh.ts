@@ -127,6 +127,9 @@ export const zh: Record<keyof typeof en, string> = {
   allocationCurrentPricing: '当前版本的价格覆盖',
   allocationScheduledPricing: '待生效版本的价格覆盖',
   allocationStartNext: '从下个周期开始',
+  allocationApplyNow: '立即生效',
+  allocationApplyNowWarning: '修改将立即应用到新请求，正在进行的请求不受影响',
+  allocationScheduledHint: '修改将在下个周期开始时生效（更安全）',
   allocationImmediateHint:
     '立即生效：从生效时开始记录新请求的用量，不补记此前用量。',
   allocationScheduled: '{{mode}} 将于 {{date}} 生效',
@@ -208,6 +211,8 @@ export const zh: Record<keyof typeof en, string> = {
   requestFiltersFailed: '无法加载成员与密钥选项。',
   requestFilterHint: '搜索最近 7 天保留的请求，模型名称需精确匹配。',
   requestFirstTokenValue: '首个输出：{{value}}',
+  requestReasoningEffort: '推理强度',
+  requestReasoningEffortValue: '推理强度：{{value}}',
   requestFirstToken: '首个输出延迟',
   requestFirstTokenHint:
     '从网关开始处理到收到首个文本、推理或工具参数增量的时间。未观察到输出增量时不计。',

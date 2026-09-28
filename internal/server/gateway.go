@@ -290,7 +290,9 @@ func gatewayFailure(err error) (int, string) {
 		return 409, "conversation_account_unavailable"
 	case errors.Is(err, gateway.ErrNoAccount):
 		return 503, "no_accounts_available"
-	case errors.Is(err, allocations.ErrQuota), errors.Is(err, allocations.ErrPending), errors.Is(err, allocations.ErrRisk):
+	case errors.Is(err, allocations.ErrQuota):
+		return 403, err.Error()
+	case errors.Is(err, allocations.ErrPending), errors.Is(err, allocations.ErrRisk):
 		return 429, err.Error()
 	case errors.Is(err, allocations.ErrUnavailable):
 		return 403, err.Error()
@@ -299,7 +301,7 @@ func gatewayFailure(err error) (int, string) {
 	case errors.Is(err, gateway.ErrAllocationAccounting):
 		return 503, "allocation_accounting_unavailable"
 	case errors.Is(err, gateway.ErrQuotaExhausted):
-		return 429, "quota_exhausted"
+		return 403, "quota_exhausted"
 	case errors.Is(err, gateway.ErrAccountCooling):
 		return 429, "account_cooling"
 	case errors.Is(err, gateway.ErrMemberBusy):

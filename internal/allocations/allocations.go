@@ -85,6 +85,7 @@ type SchemeInput struct {
 	GroupID   int64  `json:"group_id"`
 	Enabled   bool   `json:"enabled"`
 	StartNext bool   `json:"start_next"`
+	ApplyNow  bool   `json:"apply_now"` // If true, edit takes effect immediately instead of at period end
 	Config    Config `json:"config"`
 }
 type Revision struct {
@@ -452,7 +453,12 @@ func (s *Service) SaveScheme(ctx context.Context, id int64, in SchemeInput) (Sch
 		}
 		current, err := Current(ctx, q, id, now)
 		if err == nil {
-			effective = nextEffective(current.Config, now, s.location(), current.EffectiveAt)
+			// Support immediate application of edits via ApplyNow flag
+			if in.ApplyNow {
+				effective = now
+			} else {
+				effective = nextEffective(current.Config, now, s.location(), current.EffectiveAt)
+			}
 		} else if errors.Is(err, ErrUnavailable) {
 			next, e := q.NextAllocationRevision(ctx, db.NextAllocationRevisionParams{SchemeID: id, EffectiveAt: now})
 			if e != nil {

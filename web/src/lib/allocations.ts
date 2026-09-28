@@ -101,6 +101,7 @@ export type SchemeInput = {
   group_id: number
   enabled: boolean
   start_next: boolean
+  apply_now?: boolean
   config: AllocationConfig
 }
 export const schemesOptions = queryOptions({

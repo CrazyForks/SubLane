@@ -141,6 +141,7 @@ export function SchemeForm({
   )
   const nextRuleID = useRef(0)
   const [startNext, setStartNext] = useState(false)
+  const [applyNow, setApplyNow] = useState(false)
   const [previewAnchor] = useState(() => Math.floor(Date.now() / 1000))
   const [values, setValues] = useState<Record<number, string>>(
     Object.fromEntries(
@@ -313,6 +314,7 @@ export function SchemeForm({
       group_id: groupID,
       enabled,
       start_next: startNext,
+      apply_now: applyNow,
       config: {
         mode,
         period,
@@ -1019,9 +1021,30 @@ export function SchemeForm({
                 {t('allocationStartNext')}
               </label>
             )}
+            {scheme && (
+              <label className="flex items-start gap-2 text-sm leading-6">
+                <input
+                  type="checkbox"
+                  className="mt-1 size-4 shrink-0 accent-primary"
+                  checked={applyNow}
+                  onChange={(e) => setApplyNow(e.target.checked)}
+                />
+                {t('allocationApplyNow')}
+              </label>
+            )}
             {!scheme && !startNext && (
               <p className="text-sm leading-6 text-muted-foreground">
                 {t('allocationImmediateHint')}
+              </p>
+            )}
+            {scheme && applyNow && (
+              <p className="text-sm leading-6 text-yellow-600 dark:text-yellow-500">
+                ⚠️ {t('allocationApplyNowWarning')}
+              </p>
+            )}
+            {scheme && !applyNow && (
+              <p className="text-sm leading-6 text-muted-foreground">
+                {t('allocationScheduledHint')}
               </p>
             )}
           </div>
