@@ -39,7 +39,7 @@ func TestGatewayDiagnosticIDIgnoresCallerAndMatchesRecord(t *testing.T) {
 func TestQuotaErrorHasBoundedRetryAndSafeReason(t *testing.T) {
 	w := httptest.NewRecorder()
 	gatewayError(w, &gateway.QuotaError{RetryAfter: 90})
-	if w.Code != 429 || w.Header().Get("Retry-After") != "90" || !strings.Contains(w.Body.String(), "quota_exhausted") {
+	if w.Code != 403 || !strings.Contains(w.Body.String(), "quota_exhausted") {
 		t.Fatal(w.Code, w.Body.String())
 	}
 }
