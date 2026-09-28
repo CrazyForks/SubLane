@@ -211,7 +211,7 @@ func (s *Service) save(ctx context.Context, name string, credential Credential, 
 	if err := tx.Commit(); err != nil {
 		return Account{}, err
 	}
-	return Account{ID: id, Provider: credential.Kind(), Name: name, Email: credential.Email, Plan: credential.Plan, Enabled: true, Status: status, ExpiresAt: credential.ExpiresAt, CreatedAt: now, UpdatedAt: now, MaxConcurrency: 2, ProxyID: proxyID}, nil
+	return Account{ID: id, Provider: credential.Kind(), Name: name, Email: credential.Email, Plan: credential.Plan, Enabled: true, Status: status, ExpiresAt: credential.ExpiresAt, CreatedAt: now, UpdatedAt: now, MaxConcurrency: 30, ProxyID: proxyID}, nil
 }
 
 func (s *Service) SetEnabled(ctx context.Context, id string, enabled bool) (Account, error) {

@@ -166,15 +166,30 @@ func TestRuntimeManagementRemainsAdministratorOnly(t *testing.T) {
 	if got := request(h, "PATCH", "/api/accounts/"+id+"/limits", "http://foreign.example.test", map[string]int{"max_concurrency": 1}, owner).Code; got != 403 {
 		t.Fatal("cross-origin policy update", got)
 	}
-	result := request(h, "PATCH", "/api/accounts/"+id+"/limits", "http://example.test", map[string]int{"max_concurrency": 1}, owner)
-	var updated struct {
-		Max int64 `json:"max_concurrency"`
+	for _, limit := range []int64{1, 8, 30} {
+		result := request(h, "PATCH", "/api/accounts/"+id+"/limits", "http://example.test", map[string]int64{"max_concurrency": limit}, owner)
+		var updated struct {
+			Max int64 `json:"max_concurrency"`
+		}
+		if result.Code != 200 || json.Unmarshal(result.Body.Bytes(), &updated) != nil || updated.Max != limit {
+			t.Fatalf("policy %d not saved: %d %s", limit, result.Code, result.Body.String())
+		}
+		for _, path := range []string{"/api/accounts", "/api/accounts/runtime"} {
+			listed := request(h, "GET", path, "", nil, owner)
+			var page struct {
+				Accounts []struct {
+					Max int64 `json:"max_concurrency"`
+				} `json:"accounts"`
+			}
+			if listed.Code != 200 || json.Unmarshal(listed.Body.Bytes(), &page) != nil || len(page.Accounts) != 1 || page.Accounts[0].Max != limit {
+				t.Fatalf("%s did not return saved limit %d: %d %s", path, limit, listed.Code, listed.Body.String())
+			}
+		}
 	}
-	if result.Code != 200 || json.Unmarshal(result.Body.Bytes(), &updated) != nil || updated.Max != 1 {
-		t.Fatal("policy not saved", result.Body.String())
-	}
-	if got := request(h, "PATCH", "/api/accounts/"+id+"/limits", "http://example.test", map[string]int{"max_concurrency": 0}, owner).Code; got != 400 {
-		t.Fatal("invalid concurrency accepted", got)
+	for _, limit := range []int{0, 31} {
+		if got := request(h, "PATCH", "/api/accounts/"+id+"/limits", "http://example.test", map[string]int{"max_concurrency": limit}, owner).Code; got != 400 {
+			t.Fatal("invalid concurrency accepted", limit, got)
+		}
 	}
 	if got := request(h, "POST", "/api/accounts/"+id+"/resume", "http://example.test", map[string]any{}, owner).Code; got != 204 {
 		t.Fatal("resume failed", got)

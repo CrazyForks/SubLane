@@ -44,6 +44,39 @@ func syntheticStream() *http.Response {
 	return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: io.NopCloser(strings.NewReader("data: {\"type\":\"response.completed\",\"response\":{\"id\":\"synthetic\",\"output\":[],\"usage\":{\"input_tokens\":3,\"output_tokens\":2}}}\n\n"))}
 }
 
+func TestAccountConcurrencySupportsThirtyAndPreservesLimitAcrossRestart(t *testing.T) {
+	ctx := context.Background()
+	s, ids := codexGateway(t, transportFunc(func(*http.Request) (*http.Response, error) { return syntheticStream(), nil }))
+	for _, limit := range []int64{1, 30} {
+		if err := s.SetConcurrency(ctx, ids["codex"], limit); err != nil {
+			t.Fatal("valid account limit rejected", limit, err)
+		}
+	}
+	for _, limit := range []int64{0, 31} {
+		if err := s.SetConcurrency(ctx, ids["codex"], limit); !errors.Is(err, accounts.ErrInput) {
+			t.Fatal("invalid account limit accepted", limit, err)
+		}
+	}
+	restarted := New(ctx, s.db, s.accounts, s.provider)
+	defer restarted.Close()
+	states, err := restarted.Runtime(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, state := range states {
+		if state.ID == ids["codex"] {
+			found = true
+			if state.MaxConcurrency != 30 {
+				t.Fatal("restart lost account concurrency", state.MaxConcurrency)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("restart lost the account runtime")
+	}
+}
+
 func TestAccountLeaseCoversStreamAndRejectsStickyOverload(t *testing.T) {
 	ctx := context.Background()
 	service, ids := codexGateway(t, transportFunc(func(*http.Request) (*http.Response, error) { return syntheticStream(), nil }))

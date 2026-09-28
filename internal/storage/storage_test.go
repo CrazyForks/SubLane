@@ -86,6 +86,74 @@ func TestOpenAddsInvitationMigrationToExistingSchema(t *testing.T) {
 	}
 }
 
+func TestOpenUpdatesAccountConcurrencyDefaultAndPreservesSettings(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "synthetic-account-limits.db")
+	previous, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = previous.Close() })
+	initial, err := migrations.ReadFile("migrations/001_schema.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, statement := range []string{
+		`CREATE TABLE schema_migrations (name TEXT PRIMARY KEY NOT NULL, applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
+		string(initial),
+		`INSERT INTO schema_migrations(name) VALUES('001_schema.sql')`,
+		`INSERT INTO users(id,username,password_hash,role,created_at) VALUES(1,'synthetic-owner','synthetic-hash','admin',1)`,
+		`INSERT INTO tenants(id,name,owner_user_id,created_at) VALUES(1,'Synthetic workspace',1,1)`,
+		`INSERT INTO accounts(id,provider,name,account_id,email,plan,status,credential,expires_at,created_at,updated_at,max_concurrency) VALUES
+		 ('synthetic-low','codex','Synthetic low','synthetic-low','','','ready',X'00',0,1,1,1),
+		 ('synthetic-default','codex','Synthetic default','synthetic-default','','','ready',X'00',0,1,1,2),
+		 ('synthetic-high','codex','Synthetic high','synthetic-high','','','ready',X'00',0,1,1,8)`,
+		`INSERT INTO account_groups(id,name,enabled,created_at,updated_at) VALUES(1,'Synthetic pool',1,1,1)`,
+		`INSERT INTO group_accounts(group_id,account_id) VALUES(1,'synthetic-default')`,
+	} {
+		if _, err := previous.ExecContext(ctx, statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := previous.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for attempt := range 2 {
+		upgraded, err := Open(ctx, path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = upgraded.Close() })
+		for id, limit := range map[string]int{"synthetic-low": 1, "synthetic-default": 2, "synthetic-high": 8} {
+			var got int
+			if err := upgraded.QueryRowContext(ctx, "SELECT max_concurrency FROM accounts WHERE id=?", id).Scan(&got); err != nil || got != limit {
+				t.Fatal("migration changed a saved account setting", id, got, err)
+			}
+		}
+		var references int
+		if err := upgraded.QueryRowContext(ctx, "SELECT count(*) FROM group_accounts WHERE account_id='synthetic-default'").Scan(&references); err != nil || references != 1 {
+			t.Fatal("migration lost account pool references", references, err)
+		}
+		if attempt == 0 {
+			if _, err := upgraded.ExecContext(ctx, `INSERT INTO accounts(id,provider,name,account_id,email,plan,status,credential,expires_at,created_at,updated_at) VALUES('synthetic-new','codex','Synthetic new','synthetic-new','','','ready',X'00',0,2,2)`); err != nil {
+				t.Fatal(err)
+			}
+		}
+		var got int
+		if err := upgraded.QueryRowContext(ctx, "SELECT max_concurrency FROM accounts WHERE id='synthetic-new'").Scan(&got); err != nil || got != 30 {
+			t.Fatal("new account default did not become 30", got, err)
+		}
+		for _, invalid := range []int{0, 31} {
+			if _, err := upgraded.ExecContext(ctx, "UPDATE accounts SET max_concurrency=? WHERE id='synthetic-new'", invalid); err == nil {
+				t.Fatal("database accepted an invalid account limit", invalid)
+			}
+		}
+		if err := upgraded.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 func TestOpenUpdatesMemberConcurrencyDefaultAndPreservesLimits(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "synthetic-members.db")

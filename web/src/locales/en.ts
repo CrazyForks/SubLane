@@ -1018,8 +1018,8 @@ export const en = {
   accountScheduling: 'Scheduling settings',
   accountConcurrencyLimit: 'Concurrent model requests',
   accountConcurrencyHint:
-    'Allow 1–8 active model requests for this account across all pools. Lowering the limit lets existing requests finish.',
-  accountConcurrencyInvalid: 'Enter a whole number from 1 to 8.',
+    'Allow 1–30 active model requests for this account across all pools. New accounts default to 30; existing account settings stay unchanged. Lowering the limit lets existing requests finish.',
+  accountConcurrencyInvalid: 'Enter a whole number from 1 to 30.',
   lastAccountFailure: 'Last scheduling failure',
   resumeAccountHint:
     'Clear the cooldown to allow requests again. This does not enable a disabled account or renew its authorization.',
