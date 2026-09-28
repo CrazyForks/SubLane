@@ -2,12 +2,15 @@ import { useState, type FormEvent } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { catalogOptions } from '@/lib/catalog'
 import { ModelPicker } from './ModelPicker'
-import { ExternalLink, LoaderCircle } from 'lucide-react'
+import { ChevronDown, ExternalLink, LoaderCircle } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import {
+  ccSwitchApps,
+  ccSwitchEndpoint,
   ccSwitchLink,
   openCCSwitch,
   validImportSettings,
+  type ImportApp,
   type ImportSettings,
 } from '@/lib/ccswitch'
 import type { APIKey } from '@/lib/keys'
@@ -15,6 +18,13 @@ import { ApiError } from '@/lib/request'
 import { useKeySecret } from '@/hooks/use-key-secret'
 import { Button } from './ui/Button'
 import { Input } from './ui/Input'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from './ui/DropdownMenu'
 import {
   Dialog,
   DialogContent,
@@ -97,6 +107,7 @@ function ImportForm({
 }) {
   const { t } = useTranslation()
   const [name, setName] = useState(`SubLane · ${value.name}`)
+  const [app, setApp] = useState<ImportApp>('codex')
   const [model, setModel] = useState('')
   const [invalid, setInvalid] = useState(false)
   const [prepared, setPrepared] = useState<string | null>(null)
@@ -118,7 +129,7 @@ function ImportForm({
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     if (mutation.isPending || prepared) return
-    const input = { origin, name, model }
+    const input = { origin, name, model, app }
     const valid = validImportSettings(input) && modelAllowed
     setInvalid(!valid)
     if (valid) mutation.mutate(input)
@@ -150,13 +161,50 @@ function ImportForm({
         <DialogDescription>{t('ccSwitchDescription')}</DialogDescription>
       </DialogHeader>
       <form onSubmit={submit} noValidate className="space-y-5">
-        <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
-          <span className="font-medium">Codex</span>
-          <span className="text-muted-foreground">
-            {t('keyGroupName', {
-              name: value.group_name,
-            })}
-          </span>
+        <div className="space-y-2">
+          <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+            <span id="cc-switch-client-label" className="font-medium">
+              {t('ccSwitchClient')}
+            </span>
+            <span className="text-muted-foreground">
+              {t('keyGroupName', {
+                name: value.group_name,
+              })}
+            </span>
+          </div>
+          <DropdownMenu modal={false}>
+            <DropdownMenuTrigger asChild>
+              <Button
+                type="button"
+                variant="outline"
+                aria-labelledby="cc-switch-client-label"
+                disabled={mutation.isPending || prepared !== null}
+                className="w-full justify-between border-input font-normal shadow-none dark:bg-background dark:hover:bg-accent"
+              >
+                {t(`ccSwitchApp_${app}`)}
+                <ChevronDown
+                  aria-hidden="true"
+                  className="text-muted-foreground"
+                />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              align="start"
+              className="w-[var(--radix-dropdown-menu-trigger-width)]"
+            >
+              <DropdownMenuRadioGroup
+                value={app}
+                onValueChange={(value) => setApp(value as ImportApp)}
+                aria-label={t('ccSwitchClient')}
+              >
+                {ccSwitchApps.map((option) => (
+                  <DropdownMenuRadioItem key={option} value={option}>
+                    {t(`ccSwitchApp_${option}`)}
+                  </DropdownMenuRadioItem>
+                ))}
+              </DropdownMenuRadioGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
         <div className="space-y-2">
           <label htmlFor="cc-switch-name" className="text-sm font-medium">
@@ -179,6 +227,21 @@ function ImportForm({
             models={catalog.data?.models ?? []}
             disabled={mutation.isPending || prepared !== null}
           />
+          {app === 'claude' && (
+            <p className="text-xs leading-5 text-muted-foreground">
+              {t('ccSwitchClaudeHint')}
+            </p>
+          )}
+          {app === 'gemini' && (
+            <p className="text-xs leading-5 text-muted-foreground">
+              {t('ccSwitchGeminiHint')}
+            </p>
+          )}
+          {app === 'grokbuild' && (
+            <p className="text-xs leading-5 text-muted-foreground">
+              {t('ccSwitchGrokHint')}
+            </p>
+          )}
           {catalog.isPending && (
             <p role="status" className="text-xs text-muted-foreground">
               {t('catalogLoading')}
@@ -223,7 +286,9 @@ function ImportForm({
         <dl className="space-y-3 text-sm">
           <div>
             <dt className="text-muted-foreground">{t('clientEndpoint')}</dt>
-            <dd className="mt-1 break-all font-mono text-xs">{origin}/v1</dd>
+            <dd className="mt-1 break-all font-mono text-xs">
+              {ccSwitchEndpoint(origin, app)}
+            </dd>
           </div>
           <div>
             <dt className="text-muted-foreground">{t('apiKey')}</dt>

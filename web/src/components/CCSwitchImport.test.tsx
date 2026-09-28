@@ -46,6 +46,84 @@ function open(value = key) {
   )
   return { client, ...result }
 }
+it.each([
+  ['OpenCode', 'opencode', '/v1'],
+  ['Claude Code', 'claude', ''],
+  ['OpenClaw', 'openclaw', '/v1'],
+  ['Hermes', 'hermes', '/v1'],
+  ['Gemini CLI', 'gemini', ''],
+  ['Grok Build', 'grokbuild', '/v1'],
+])(
+  'prepares and launches %s from the selected client',
+  async (label, app, path) => {
+    const fetch = vi
+      .fn()
+      .mockImplementation(() => Promise.resolve(response({ secret })))
+    vi.stubGlobal('fetch', fetch)
+    const launch = vi
+      .spyOn(ccswitch, 'openCCSwitch')
+      .mockImplementation(() => {})
+    const user = userEvent.setup()
+    const { client } = open()
+    await user.click(
+      screen.getByRole('button', {
+        name: 'Import Synthetic laptop into CC Switch',
+      }),
+    )
+    const selector = screen.getByRole('button', { name: 'Client' })
+    expect(selector.textContent).toContain('Codex')
+    await user.click(selector)
+    await user.click(screen.getByRole('menuitemradio', { name: label }))
+    expect(selector.textContent).toContain(label)
+    expect(screen.getByText(window.location.origin + path)).toBeTruthy()
+    expect(fetch).not.toHaveBeenCalled()
+    await user.type(screen.getByLabelText('Model ID'), 'synthetic-model')
+    await user.click(screen.getByRole('button', { name: 'Prepare import' }))
+    const ready = await screen.findByRole('button', { name: 'Open CC Switch' })
+    expect(selector.hasAttribute('disabled')).toBe(true)
+    expect(launch).not.toHaveBeenCalled()
+    expect(document.documentElement.innerHTML).not.toContain(secret)
+    expect(
+      JSON.stringify(
+        client
+          .getQueryCache()
+          .getAll()
+          .map((q) => q.state.data),
+      ),
+    ).not.toContain(secret)
+    expect(
+      JSON.stringify(
+        client
+          .getMutationCache()
+          .getAll()
+          .map((m) => m.state),
+      ),
+    ).not.toContain(secret)
+    await user.click(ready)
+    const link = new URL(launch.mock.calls[0][0])
+    expect(link.searchParams.get('app')).toBe(app)
+    expect(link.searchParams.get('endpoint')).toBe(
+      window.location.origin + path,
+    )
+    expect(link.searchParams.get('model')).toBe('synthetic-model')
+    expect(link.searchParams.get('enabled')).toBe('false')
+    await user.click(screen.getByRole('button', { name: 'Edit configuration' }))
+    expect(screen.queryByRole('button', { name: 'Open CC Switch' })).toBeNull()
+    await user.click(selector)
+    await user.click(screen.getByRole('menuitemradio', { name: 'Codex' }))
+    await user.click(screen.getByRole('button', { name: 'Prepare import' }))
+    await user.click(
+      await screen.findByRole('button', { name: 'Open CC Switch' }),
+    )
+    const edited = new URL(launch.mock.calls[1][0])
+    expect(edited.searchParams.get('app')).toBe('codex')
+    expect(edited.searchParams.get('endpoint')).toBe(
+      window.location.origin + '/v1',
+    )
+    expect(edited.searchParams.has('haikuModel')).toBe(false)
+    expect(fetch).toHaveBeenCalledTimes(2)
+  },
+)
 it('prepares only after a valid submission and opens the local app from a second gesture', async () => {
   const fetch = vi.fn().mockResolvedValue(response({ secret }))
   vi.stubGlobal('fetch', fetch)

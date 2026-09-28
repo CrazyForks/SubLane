@@ -288,12 +288,19 @@ it('switches client protocols and copies matching request examples', async () =>
     name: 'Connect your client',
   })
   await user.type(within(guide).getByLabelText('Model ID'), 'synthetic-model')
-  for (const [label, endpoint, header] of [
-    ['Claude Messages', '/v1/messages', 'x-api-key'],
+  for (const [label, endpoint, header, basePath] of [
+    [
+      'Cline / OpenAI compatible',
+      '/v1/chat/completions',
+      'Authorization: Bearer',
+      '/v1',
+    ],
+    ['Claude Messages', '/v1/messages', 'x-api-key', ''],
     [
       'Gemini API',
       '/v1beta/models/synthetic-model:generateContent',
       'x-goog-api-key',
+      '',
     ],
   ]) {
     await user.click(
@@ -302,7 +309,12 @@ it('switches client protocols and copies matching request examples', async () =>
     await user.click(await screen.findByRole('menuitemradio', { name: label }))
     expect(
       (within(guide).getByLabelText('API base URL') as HTMLInputElement).value,
-    ).toBe(window.location.origin)
+    ).toBe(window.location.origin + basePath)
+    if (label === 'Cline / OpenAI compatible') {
+      expect(
+        within(guide).getByText(/In Cline settings, select OpenAI Compatible/),
+      ).toBeTruthy()
+    }
     await user.click(
       within(guide).getByRole('button', { name: 'Copy configuration' }),
     )

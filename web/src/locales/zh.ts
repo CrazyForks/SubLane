@@ -346,7 +346,19 @@ export const zh: Record<keyof typeof en, string> = {
   ccSwitchImport: '导入 CC Switch',
   ccSwitchImportNamed: '将 {{name}} 导入 CC Switch',
   ccSwitchDescription:
-    '使用此 API 密钥准备 Codex 连接配置，然后在 CC Switch 中确认导入。',
+    '为此 API 密钥选择客户端和模型，然后在 CC Switch 中确认导入。',
+  ccSwitchClient: '客户端',
+  ccSwitchApp_codex: 'Codex',
+  ccSwitchApp_opencode: 'OpenCode',
+  ccSwitchApp_claude: 'Claude Code',
+  ccSwitchApp_openclaw: 'OpenClaw',
+  ccSwitchApp_hermes: 'Hermes',
+  ccSwitchApp_gemini: 'Gemini CLI',
+  ccSwitchApp_grokbuild: 'Grok Build',
+  ccSwitchClaudeHint: 'Haiku、Sonnet 和 Opus 均使用所选的账号池模型。',
+  ccSwitchGeminiHint:
+    'Gemini CLI 使用 API 密钥认证。暂不提供 Token 计数和 Gemini 原生模型发现接口，导入后请先验证一轮对话。',
+  ccSwitchGrokHint: '导入后请检查 CC Switch 中的上下文窗口是否符合所选模型。',
   ccSwitchName: '配置名称',
   ccSwitchModelHint:
     '填写此密钥所属账号池允许的完整模型 ID，需要时带上服务商前缀。',
@@ -598,9 +610,12 @@ export const zh: Record<keyof typeof en, string> = {
   gatewayKeySetupDescription: '首次调用前，请为已就绪的账号池创建个人密钥。',
   clientGuideTitle: '接入客户端',
   clientGuideDescription:
-    '选择客户端支持的 API 协议，使用个人 SubLane API 密钥接入。',
+    '选择客户端或 API 协议，使用个人 SubLane API 密钥接入。',
   clientProtocol: '客户端协议',
   clientProtocolCodex: 'Codex（Responses）',
+  clientProtocolOpenAI: 'Cline / OpenAI 兼容',
+  clientClineInstructions:
+    '在 Cline 设置中选择 OpenAI Compatible，填写下方 API 基础地址和模型 ID，并在 API Key 中粘贴个人 SubLane 密钥。如果 Plan 与 Act 使用独立配置，请分别设置。',
   clientProtocolClaude: 'Claude Messages',
   clientProtocolGemini: 'Gemini API',
   clientRequestExample: '请求示例',
