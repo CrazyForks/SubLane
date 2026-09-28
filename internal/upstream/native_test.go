@@ -10,6 +10,36 @@ import (
 
 const messageStart = `data: {"type":"message_start","message":{"id":"synthetic","type":"message","role":"assistant"}}` + "\n\n"
 
+func TestNativeLargeRequestValidation(t *testing.T) {
+	text := strings.Repeat("x", (8<<20)+1)
+	if err := ValidateMessages([]byte(`{"model":"synthetic","max_tokens":1,"messages":[{"role":"user","content":"` + text + `"}]}`)); err != nil {
+		t.Fatal("large Messages request rejected", err)
+	}
+	if _, err := GeminiRequest([]byte(`{"contents":[{"parts":[{"text":"`+text+`"}]}]}`), "synthetic"); err != nil {
+		t.Fatal("large Gemini request rejected", err)
+	}
+}
+
+func TestNativeConfiguredRequestBodyLimit(t *testing.T) {
+	messages := []byte(`{"model":"synthetic","max_tokens":1,"messages":[{"role":"user","content":"synthetic"}]}`)
+	if err := ValidateMessages(messages, int64(len(messages))); err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateMessages(messages, int64(len(messages)-1)); !errors.Is(err, ErrInput) {
+		t.Fatal("oversized Messages request accepted", err)
+	}
+	gemini := []byte(`{"contents":[{"parts":[{"text":"synthetic"}]}]}`)
+	if err := ValidateGemini(gemini, int64(len(gemini))); err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateGemini(gemini, int64(len(gemini)-1)); !errors.Is(err, ErrInput) {
+		t.Fatal("oversized Gemini request accepted", err)
+	}
+	if _, err := GeminiRequest(gemini, "synthetic", int64(len(gemini))); !errors.Is(err, ErrInput) {
+		t.Fatal("normalized Gemini request exceeded limit", err)
+	}
+}
+
 func TestNativeStreamCompletionAndFailureBoundaries(t *testing.T) {
 	for _, tc := range []struct {
 		name, input string

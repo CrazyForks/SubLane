@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gorilla/websocket"
 	"github.com/murongg/SubLane/internal/accounts"
 	"github.com/murongg/SubLane/internal/apikey"
 	"github.com/murongg/SubLane/internal/auth"
@@ -49,7 +50,7 @@ func newQuotaForwardFixture(t *testing.T, handler http.HandlerFunc) forwardFixtu
 func newProviderFixture(t *testing.T, provider string, handler http.HandlerFunc) forwardFixture {
 	return newForwardingFixture(t, provider, handler, false)
 }
-func newForwardingFixture(t *testing.T, provider string, handler http.HandlerFunc, quota bool) forwardFixture {
+func newForwardingFixture(t *testing.T, provider string, handler http.HandlerFunc, quota bool, maxRequestBody ...int64) forwardFixture {
 	t.Helper()
 	ctx := context.Background()
 	dir := t.TempDir()
@@ -89,7 +90,11 @@ func newForwardingFixture(t *testing.T, provider string, handler http.HandlerFun
 	fakeUpstream := httptest.NewServer(handler)
 	t.Cleanup(fakeUpstream.Close)
 	target, _ := url.Parse(fakeUpstream.URL)
-	client := upstream.NewWithTransport(gatewayTransport(func(r *http.Request) (*http.Response, error) {
+	var bodyLimit int64
+	if len(maxRequestBody) > 0 {
+		bodyLimit = maxRequestBody[0]
+	}
+	client := upstream.NewWithOptions(upstream.Options{MaxRequestBody: bodyLimit, Transport: gatewayTransport(func(r *http.Request) (*http.Response, error) {
 		if !quota && r.URL.Path == "/backend-api/wham/usage" {
 			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"rate_limit":{}}`))}, nil
 		}
@@ -100,7 +105,7 @@ func newForwardingFixture(t *testing.T, provider string, handler http.HandlerFun
 		copy.URL.Scheme = target.Scheme
 		copy.URL.Host = target.Host
 		return http.DefaultTransport.RoundTrip(copy)
-	}))
+	})})
 	t.Cleanup(client.Close)
 	configureTestPool(t, db)
 	keys := newTestKeyService(t, db)
@@ -121,6 +126,120 @@ func newForwardingFixture(t *testing.T, provider string, handler http.HandlerFun
 	server.Start()
 	t.Cleanup(server.Close)
 	return forwardFixture{groups: pools, accounts: service, forwarding: forwarding, server: server, upgrades: upgrades, secret: created.Secret, keyID: created.Key.ID, userID: member.ID, keys: keys, identity: identity}
+}
+
+func TestGatewayLargeRequests(t *testing.T) {
+	prompt := strings.Repeat("x", (8<<20)+1)
+	var calls atomic.Int32
+	fixture := newForwardFixture(t, func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil || !strings.Contains(string(body), prompt) {
+			t.Error("large request content was not preserved", err)
+		}
+		calls.Add(1)
+		if strings.HasSuffix(r.URL.Path, "/compact") {
+			w.Header().Set("Content-Type", "application/json")
+			io.WriteString(w, `{"id":"resp_test","output":[]}`)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		io.WriteString(w, "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_test\",\"output\":[]}}\n\n")
+	})
+	for _, path := range []string{"/v1/responses", "/v1/chat/completions", "/v1/responses/compact"} {
+		t.Run(path, func(t *testing.T) {
+			body := []byte(`{"model":"synthetic-model","instructions":"` + prompt + `","input":[]}`)
+			if path == "/v1/chat/completions" {
+				body = []byte(`{"model":"synthetic-model","messages":[{"role":"user","content":"` + prompt + `"}]}`)
+			}
+			req, _ := http.NewRequest("POST", fixture.server.URL+path, strings.NewReader(string(body)))
+			req.Header.Set("Authorization", "Bearer "+fixture.secret)
+			req.Header.Set("Content-Type", "application/json")
+			response, err := fixture.server.Client().Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer response.Body.Close()
+			if response.StatusCode != http.StatusOK {
+				t.Fatalf("large request status: %d", response.StatusCode)
+			}
+			if _, err := io.Copy(io.Discard, response.Body); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+	t.Run("websocket", func(t *testing.T) {
+		conn, _, err := websocket.DefaultDialer.Dial(strings.Replace(fixture.server.URL, "http://", "ws://", 1)+"/v1/responses", http.Header{"Authorization": {"Bearer " + fixture.secret}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer conn.Close()
+		conn.SetReadDeadline(time.Now().Add(15 * time.Second))
+		if err := conn.WriteJSON(map[string]any{"type": "response.create", "model": "synthetic-model", "instructions": prompt, "input": []any{}}); err != nil {
+			t.Fatal(err)
+		}
+		for {
+			_, data, err := conn.ReadMessage()
+			if err != nil {
+				t.Fatal(err)
+			}
+			var event struct {
+				Type string `json:"type"`
+			}
+			if err := json.Unmarshal(data, &event); err != nil {
+				t.Fatal(err)
+			}
+			if event.Type == "error" {
+				t.Fatal("large websocket request was rejected")
+			}
+			if event.Type == "response.completed" {
+				break
+			}
+		}
+	})
+	if calls.Load() != 4 {
+		t.Fatalf("forwarded requests: %d, want 4", calls.Load())
+	}
+}
+
+func TestGatewayConfiguredRequestBodyLimit(t *testing.T) {
+	const limit = 1024
+	var calls atomic.Int32
+	fixture := newForwardingFixture(t, "codex", func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.Header().Set("Content-Type", "text/event-stream")
+		io.WriteString(w, "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_test\",\"output\":[]}}\n\n")
+	}, false, limit)
+	for _, chunked := range []bool{false, true} {
+		for _, size := range []int{limit - 1, limit, limit + 1} {
+			raw := `{"model":"synthetic-model","input":[]}`
+			raw += strings.Repeat(" ", size-len(raw))
+			req, _ := http.NewRequest("POST", fixture.server.URL+"/v1/responses", strings.NewReader(raw))
+			if chunked {
+				req.ContentLength = -1
+			}
+			req.Header.Set("Authorization", "Bearer "+fixture.secret)
+			req.Header.Set("Content-Type", "application/json")
+			response, err := fixture.server.Client().Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, err := io.ReadAll(response.Body)
+			response.Body.Close()
+			want := http.StatusOK
+			if size > limit {
+				want = http.StatusRequestEntityTooLarge
+			}
+			if err != nil || response.StatusCode != want {
+				t.Fatalf("size=%d chunked=%t: status=%d, want %d; %v", size, chunked, response.StatusCode, want, err)
+			}
+			if size > limit && !strings.Contains(string(body), "request_too_large") {
+				t.Fatal("missing request limit error")
+			}
+		}
+	}
+	if calls.Load() != 4 {
+		t.Fatalf("oversized requests reached upstream: calls=%d", calls.Load())
+	}
 }
 
 func TestGatewayForwardsResponsesAndCancelsUpstream(t *testing.T) {

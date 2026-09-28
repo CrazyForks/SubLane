@@ -17,6 +17,28 @@ import (
 	"github.com/murongg/SubLane/internal/accounts"
 )
 
+func TestClientConfiguredRequestBodyLimit(t *testing.T) {
+	var calls atomic.Int32
+	raw := []byte(`{"model":"synthetic-model","input":[]}`)
+	for _, limit := range []int64{int64(len(raw) - 1), int64(len(raw))} {
+		client := NewWithOptions(Options{MaxRequestBody: limit, Transport: usageTransport(func(*http.Request) (*http.Response, error) {
+			calls.Add(1)
+			return nil, errors.New("unexpected synthetic upstream call")
+		})})
+		if client.MaxRequestBody() != limit {
+			t.Fatal("configured limit not applied")
+		}
+		_, err := client.Responses(context.Background(), accounts.Credential{AccessToken: "synthetic-access", AccountID: "synthetic-account"}, raw, nil, false)
+		client.Close()
+		if !errors.Is(err, ErrInput) {
+			t.Fatal("raw or expanded request exceeded limit", err)
+		}
+	}
+	if calls.Load() != 0 {
+		t.Fatal("oversized request reached upstream")
+	}
+}
+
 func TestOAuthExchangeAndRefreshUsePinnedEndpoints(t *testing.T) {
 	idToken := "e30." + base64.RawURLEncoding.EncodeToString([]byte(`{"email":"member@example.test","https://api.openai.com/auth":{"chatgpt_account_id":"upstream-test","chatgpt_plan_type":"plus"}}`)) + ".synthetic"
 	calls := 0

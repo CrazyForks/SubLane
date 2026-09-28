@@ -112,7 +112,7 @@ func run() error {
 	}
 	codexVersions.Start()
 	defer codexVersions.Close()
-	provider := upstream.NewWithVersion(codexVersions.Current)
+	provider := upstream.NewWithOptions(upstream.Options{Version: codexVersions.Current, MaxRequestBody: cfg.MaxRequestBody})
 	defer provider.Close()
 	if err := provider.Start(ctx); err != nil {
 		return err

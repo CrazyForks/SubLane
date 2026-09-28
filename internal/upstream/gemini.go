@@ -13,9 +13,9 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/translator"
 )
 
-func GeminiRequest(raw []byte, model string) ([]byte, error) {
+func GeminiRequest(raw []byte, model string, maxRequestBody ...int64) ([]byte, error) {
 	var body map[string]json.RawMessage
-	if len(raw) > MaxBody || json.Unmarshal(raw, &body) != nil || body == nil || model == "" || len(model) > 128 || strings.ContainsAny(model, "/:?#%") {
+	if int64(len(raw)) > requestBodyLimit(maxRequestBody...) || json.Unmarshal(raw, &body) != nil || body == nil || model == "" || len(model) > 128 || strings.ContainsAny(model, "/:?#%") {
 		return nil, ErrInput
 	}
 	// The route is authoritative; body fields must never bypass model policy or select the streaming operation.
@@ -25,17 +25,17 @@ func GeminiRequest(raw []byte, model string) ([]byte, error) {
 	if err != nil {
 		return nil, ErrInput
 	}
-	return encoded, ValidateGemini(encoded)
+	return encoded, ValidateGemini(encoded, maxRequestBody...)
 }
 
-func ValidateGemini(raw []byte) error {
+func ValidateGemini(raw []byte, maxRequestBody ...int64) error {
 	var request struct {
 		Contents []struct {
 			Role  string
 			Parts []map[string]json.RawMessage
 		}
 	}
-	if len(raw) > MaxBody || json.Unmarshal(raw, &request) != nil || len(request.Contents) == 0 {
+	if int64(len(raw)) > requestBodyLimit(maxRequestBody...) || json.Unmarshal(raw, &request) != nil || len(request.Contents) == 0 {
 		return ErrInput
 	}
 	for _, content := range request.Contents {
@@ -52,7 +52,7 @@ func ValidateGemini(raw []byte) error {
 }
 
 func (c *Client) Gemini(ctx context.Context, credential accounts.Credential, raw []byte, headers http.Header, stream bool) (*Stream, error) {
-	if err := ValidateGemini(raw); err != nil {
+	if err := ValidateGemini(raw, c.MaxRequestBody()); err != nil {
 		return nil, err
 	}
 	response, err := c.runSDK(ctx, credential, raw, headers, exec.Options{Stream: stream, SourceFormat: translator.FormatGemini, ResponseFormat: translator.FormatGemini})

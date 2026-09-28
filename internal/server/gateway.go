@@ -104,7 +104,7 @@ func (h *keyHTTP) proxy(w http.ResponseWriter, r *http.Request, kind gateway.Kin
 	}
 	controller := http.NewResponseController(w)
 	_ = controller.SetReadDeadline(time.Now().Add(30 * time.Second))
-	r.Body = http.MaxBytesReader(w, r.Body, upstream.MaxBody)
+	r.Body = http.MaxBytesReader(w, r.Body, h.gateway.MaxRequestBody())
 	raw, err := io.ReadAll(r.Body)
 	_ = controller.SetReadDeadline(time.Time{})
 	if err != nil {
@@ -124,7 +124,7 @@ func (h *keyHTTP) proxy(w http.ResponseWriter, r *http.Request, kind gateway.Kin
 			fail(w, upstream.ErrInput)
 			return
 		}
-		raw, err = upstream.GeminiRequest(raw, chi.URLParam(r, "model"))
+		raw, err = upstream.GeminiRequest(raw, chi.URLParam(r, "model"), h.gateway.MaxRequestBody())
 		if err != nil {
 			fail(w, err)
 			return

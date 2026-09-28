@@ -61,7 +61,7 @@ func (h *keyHTTP) websocket(w http.ResponseWriter, r *http.Request) {
 	defer conn.Close()
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
-	conn.SetReadLimit(upstream.MaxBody)
+	conn.SetReadLimit(h.gateway.MaxRequestBody())
 	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Minute))
 	conn.SetPongHandler(func(string) error { return conn.SetReadDeadline(time.Now().Add(5 * time.Minute)) })
 	messages := make(chan []byte, 1)
@@ -115,7 +115,7 @@ func (h *keyHTTP) websocket(w http.ResponseWriter, r *http.Request) {
 	if headers.Get("Session_id") == "" {
 		headers.Set("Session_id", "ws-"+randomID())
 	}
-	conversation := gateway.Conversation{}
+	conversation := gateway.Conversation{MaxRequestBody: h.gateway.MaxRequestBody()}
 	for {
 		select {
 		case <-ctx.Done():

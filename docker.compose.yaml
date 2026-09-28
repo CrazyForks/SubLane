@@ -9,6 +9,7 @@ services:
       SUBLANE_PUBLIC_URL: ${SUBLANE_PUBLIC_URL:-}
       SUBLANE_TRUSTED_PROXIES: ${SUBLANE_TRUSTED_PROXIES:-}
       SUBLANE_LOG_LEVEL: ${SUBLANE_LOG_LEVEL:-info}
+      SUBLANE_MAX_REQUEST_BODY_MB: ${SUBLANE_MAX_REQUEST_BODY_MB:-128}
     volumes:
       - sublane-data:/data
     read_only: true

@@ -37,6 +37,37 @@ func TestDefaultsAndOverrides(t *testing.T) {
 	}
 }
 
+func TestRequestBodyLimit(t *testing.T) {
+	for _, tc := range []struct {
+		value string
+		want  int64
+	}{
+		{"", 128 << 20}, {"1", 1 << 20}, {"256", 256 << 20},
+	} {
+		t.Run(tc.value, func(t *testing.T) {
+			cfg, err := Load(func(k string) string {
+				if k == "SUBLANE_MAX_REQUEST_BODY_MB" {
+					return tc.value
+				}
+				return ""
+			})
+			if err != nil || cfg.MaxRequestBody != tc.want {
+				t.Fatalf("request limit: %d, want %d; %v", cfg.MaxRequestBody, tc.want, err)
+			}
+		})
+	}
+	for _, value := range []string{"0", "-1", "1.5", "invalid", "8796093022208", "9223372036854775808"} {
+		if _, err := Load(func(k string) string {
+			if k == "SUBLANE_MAX_REQUEST_BODY_MB" {
+				return value
+			}
+			return ""
+		}); err == nil {
+			t.Fatalf("invalid request limit accepted: %s", value)
+		}
+	}
+}
+
 func TestRejectsInvalidConfig(t *testing.T) {
 	for _, env := range []map[string]string{
 		{"SUBLANE_ADDR": "localhost"}, {"SUBLANE_ADDR": "127.0.0.1:0"},
