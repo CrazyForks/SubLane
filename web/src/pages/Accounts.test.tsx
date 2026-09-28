@@ -432,24 +432,99 @@ it('shows a stored legacy account as unavailable without reconnect actions', asy
   expect(screen.getByRole('menuitem', { name: 'Remove account' })).toBeTruthy()
 })
 
-it('updates an account concurrency limit from scheduling settings', async () => {
-  let limit = 2
-  const fetch = vi
-    .fn()
-    .mockImplementation((url: string, init?: RequestInit) => {
+it.each([1, 8, 30])(
+  'updates an account concurrency limit to %i from scheduling settings',
+  async (nextLimit) => {
+    let limit = 2
+    const fetch = vi
+      .fn()
+      .mockImplementation((url: string, init?: RequestInit) => {
+        if (url === '/api/auth/state')
+          return Promise.resolve(response(authenticated))
+        if (url.endsWith('/limits')) {
+          limit = JSON.parse(String(init?.body)).max_concurrency
+          return Promise.resolve(
+            response({ ...account, max_concurrency: limit }),
+          )
+        }
+        if (url === '/api/accounts/runtime')
+          return Promise.resolve(
+            response({
+              accounts: [
+                {
+                  id: account.id,
+                  max_concurrency: limit,
+                  in_flight: 0,
+                  cooldown_until: 0,
+                  reason: '',
+                  failures: 0,
+                  state: 'available',
+                },
+              ],
+              server_time: 1900000000,
+            }),
+          )
+        return Promise.resolve(
+          response({
+            accounts: [{ ...account, enabled: false, max_concurrency: limit }],
+          }),
+        )
+      })
+    vi.stubGlobal('fetch', fetch)
+    open()
+    const user = userEvent.setup()
+    await user.click(
+      await screen.findByRole('button', {
+        name: 'Actions for Test subscription',
+      }),
+    )
+    await user.click(
+      screen.getByRole('menuitem', { name: 'Scheduling settings' }),
+    )
+    const dialog = await screen.findByRole('dialog', {
+      name: 'Scheduling settings',
+    })
+    const input = within(dialog).getByLabelText('Concurrent model requests')
+    for (const invalid of [0, 31, 1.5]) {
+      await user.clear(input)
+      await user.type(input, String(invalid))
+      await user.click(
+        within(dialog).getByRole('button', { name: 'Save settings' }),
+      )
+      expect(within(dialog).getByRole('alert').textContent).toBe(
+        'Enter a whole number from 1 to 30.',
+      )
+      expect(limit).toBe(2)
+    }
+    await user.clear(input)
+    await user.type(input, String(nextLimit))
+    await user.click(
+      within(dialog).getByRole('button', { name: 'Save settings' }),
+    )
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(limit).toBe(nextLimit)
+  },
+)
+
+it('loads accounts and scheduling status with a saved concurrency of 30', async () => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn().mockImplementation((url: string) => {
       if (url === '/api/auth/state')
         return Promise.resolve(response(authenticated))
-      if (url.endsWith('/limits')) {
-        limit = JSON.parse(String(init?.body)).max_concurrency
-        return Promise.resolve(response({ ...account, max_concurrency: limit }))
-      }
+      if (url === '/api/accounts')
+        return Promise.resolve(
+          response({
+            accounts: [{ ...account, enabled: false, max_concurrency: 30 }],
+          }),
+        )
       if (url === '/api/accounts/runtime')
         return Promise.resolve(
           response({
             accounts: [
               {
                 id: account.id,
-                max_concurrency: limit,
+                max_concurrency: 30,
                 in_flight: 0,
                 cooldown_until: 0,
                 reason: '',
@@ -460,34 +535,18 @@ it('updates an account concurrency limit from scheduling settings', async () => 
             server_time: 1900000000,
           }),
         )
-      return Promise.resolve(
-        response({
-          accounts: [{ ...account, enabled: false, max_concurrency: limit }],
-        }),
-      )
-    })
-  vi.stubGlobal('fetch', fetch)
-  open()
-  const user = userEvent.setup()
-  await user.click(
-    await screen.findByRole('button', {
-      name: 'Actions for Test subscription',
+      return Promise.reject(new Error('Unexpected request: ' + url))
     }),
   )
-  await user.click(
-    screen.getByRole('menuitem', { name: 'Scheduling settings' }),
+  const client = open()
+  expect(await screen.findByText('Test subscription')).toBeTruthy()
+  await waitFor(() =>
+    expect(client.getQueryState(['account-runtime'])?.status).toBe('success'),
   )
-  const dialog = await screen.findByRole('dialog', {
-    name: 'Scheduling settings',
-  })
-  const input = within(dialog).getByLabelText('Concurrent model requests')
-  await user.clear(input)
-  await user.type(input, '1')
-  await user.click(
-    within(dialog).getByRole('button', { name: 'Save settings' }),
-  )
-  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
-  expect(limit).toBe(1)
+  expect(screen.queryByText('Could not load subscription accounts.')).toBeNull()
+  expect(
+    screen.queryByText('Scheduling status is temporarily unavailable.'),
+  ).toBeNull()
 })
 
 it('explains why a quota-exhausted account is skipped for new sessions', async () => {

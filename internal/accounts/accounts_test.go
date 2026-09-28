@@ -98,7 +98,7 @@ func TestAccountCredentialsAndLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if account.ID == "" || !account.Enabled || account.Name != "Test subscription" {
+	if account.ID == "" || !account.Enabled || account.Name != "Test subscription" || account.MaxConcurrency != 30 {
 		t.Fatal("invalid account metadata")
 	}
 	if _, err := service.Import(ctx, "Duplicate", raw, ""); !errors.Is(err, ErrDuplicate) {
@@ -107,6 +107,9 @@ func TestAccountCredentialsAndLifecycle(t *testing.T) {
 	list, err := service.List(ctx)
 	if err != nil || len(list) != 1 {
 		t.Fatal("account missing", err)
+	}
+	if list[0].MaxConcurrency != 30 {
+		t.Fatal("new account did not persist the default concurrency", list[0].MaxConcurrency)
 	}
 	if list[0].GroupCount == nil || *list[0].GroupCount != 0 {
 		t.Fatal("new account must be unassigned", list)

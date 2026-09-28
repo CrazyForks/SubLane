@@ -98,7 +98,7 @@ func (s *Service) Runtime(ctx context.Context) ([]Runtime, error) {
 	return result, nil
 }
 func (s *Service) SetConcurrency(ctx context.Context, id string, limit int64) error {
-	if limit < 1 || limit > 8 {
+	if limit < 1 || limit > 30 {
 		return accounts.ErrInput
 	}
 	s.mu.Lock()
