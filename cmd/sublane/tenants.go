@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/murongg/SubLane/internal/accounts"
+	"github.com/murongg/SubLane/internal/alerts"
 	"github.com/murongg/SubLane/internal/apikey"
 	"github.com/murongg/SubLane/internal/audit"
 	"github.com/murongg/SubLane/internal/auth"
@@ -41,6 +42,7 @@ type tenantRegistry struct {
 	db                *sql.DB
 	vault             *vault.Vault
 	auth              *auth.Service
+	alerts            *alerts.Service
 	tenants           *tenants.Service
 	provider          *upstream.Client
 	pricing           *pricing.Service
@@ -106,7 +108,8 @@ func (r *tenantRegistry) acquire(id int64) *tenantRuntime {
 	handler := server.New(server.Options{
 		DataDir: dataDir, Assets: r.assets, Version: r.version, StartedAt: r.started,
 		Ping: r.db.PingContext, Audit: audit.NewForTenant(r.db, id), Auth: r.auth,
-		Keys: apikey.NewForTenant(r.db, r.vault, id), Accounts: accountService,
+		Alerts: r.alerts,
+		Keys:   apikey.NewForTenant(r.db, r.vault, id), Accounts: accountService,
 		OAuth: oauth.New(accountService, r.provider), Gateway: forwarding,
 		Groups: groups.NewForTenant(r.db, id), Tenants: r.tenants, TenantID: id,
 		PublicURL: r.publicURL, TrustedProxies: r.trustedProxies, LoginLimiter: r.loginLimiter, EnrollmentLimiter: r.enrollmentLimiter,

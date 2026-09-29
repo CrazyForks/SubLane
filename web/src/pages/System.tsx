@@ -1,19 +1,39 @@
 import { useQuery } from '@tanstack/react-query'
-import { Outlet } from '@tanstack/react-router'
+import { Outlet, useRouterState } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
 import { CodexVersion } from '@/components/CodexVersion'
 import { TimeZoneSettings } from '@/components/TimeZoneSettings'
+import { WorkspaceAlerts } from '@/components/WorkspaceAlerts'
 import { authOptions } from '@/lib/auth'
 
 export function System() {
   const { t } = useTranslation()
+  const workspaceOnly = useRouterState({
+    select: (state) =>
+      state.location.pathname.replace(/\/+$/, '') === '/admin/settings/alerts',
+  })
   return (
     <div className="max-w-3xl">
       <h1 className="page-title">{t('systemSettings')}</h1>
-      <p className="page-description">{t('systemSettingsDescription')}</p>
+      <p className="page-description">
+        {t(
+          workspaceOnly
+            ? 'workspaceSettingsDescription'
+            : 'systemSettingsDescription',
+        )}
+      </p>
       <Outlet />
     </div>
   )
+}
+
+export function AlertSettings() {
+  const { data } = useQuery(authOptions())
+  return data?.user?.role === 'admin' ? (
+    <div className="mt-8">
+      <WorkspaceAlerts key={data.user.id} userID={data.user.id} />
+    </div>
+  ) : null
 }
 
 export function CodexSettings() {

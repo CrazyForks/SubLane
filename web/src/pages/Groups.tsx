@@ -30,7 +30,7 @@ export function Groups() {
         <div>
           <h1 className="page-title">{t('accountGroups')}</h1>
         </div>
-        <Button onClick={() => setEditing(0)}>
+        <Button data-tour="pool" onClick={() => setEditing(0)}>
           <Plus aria-hidden="true" />
           {t('createGroup')}
         </Button>

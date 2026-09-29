@@ -217,3 +217,8 @@ Keep export and restore in two flat sections under System settings. State that a
 ### Request diagnostics
 
 Keep account/result filters in the compact request toolbar. Additional model, request ID, caller and local-time filters expand inline and use the existing custom dropdowns. Show first-output latency as secondary text under total duration; null measurements remain an em dash. Show a compact, selectable request ID with a copy action below each start time; use an em dash when older records have no ID. The start-time button opens a focused request details dialog with a selectable/copyable correlation ID. On narrow screens, filters stack and the data table scrolls inside its own container. Quota exhaustion uses a warning status with a short explanation that existing conversations retain their account.
+
+
+### First-call walkthrough
+
+The overview offers a compact, optional entry to a floating walkthrough. Highlight the existing control for the current step and position a readable, dismissible panel nearby, keeping it inside the viewport. Keep the underlying page usable. Hide the panel while a dialog or menu is open, preserve newly created keys until the user closes their dialog, and resume afterward. Back and skip stay available; advancing requires server-confirmed completion. Unknown progress never implies success. Keep keyboard focus, Escape dismissal, localization, and narrow-screen placement consistent with the rest of the application.

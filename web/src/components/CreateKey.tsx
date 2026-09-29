@@ -38,7 +38,7 @@ export function CreateKey({
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button>
+        <Button data-tour="key">
           <Plus aria-hidden="true" />
           {t('createKey')}
         </Button>

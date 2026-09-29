@@ -120,6 +120,7 @@ export function Accounts() {
           </h1>
         </div>
         <Button
+          data-tour="account"
           onClick={() => {
             clear()
             setConnecting('new')
@@ -223,6 +224,7 @@ export function Accounts() {
                   <div className="flex items-center gap-1">
                     <AccountStatus account={account} />
                     <Button
+                      data-tour="verify"
                       variant="ghost"
                       size="icon"
                       className="size-8 text-muted-foreground [@media(pointer:coarse)]:size-11"

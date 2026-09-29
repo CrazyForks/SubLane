@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/murongg/SubLane/internal/accounts"
+	"github.com/murongg/SubLane/internal/alerts"
 	"github.com/murongg/SubLane/internal/apikey"
 	"github.com/murongg/SubLane/internal/storage"
 	"github.com/murongg/SubLane/internal/storage/db"
@@ -223,6 +224,9 @@ func verifyCredentials(ctx context.Context, connection *sql.DB, directory string
 	}
 	if err := apikey.New(connection, cipher).Verify(ctx); err != nil {
 		return errors.New("backup API keys cannot be decrypted")
+	}
+	if err := alerts.New(connection, cipher, nil).Verify(ctx); err != nil {
+		return errors.New("backup webhook credentials cannot be decrypted")
 	}
 	return nil
 }

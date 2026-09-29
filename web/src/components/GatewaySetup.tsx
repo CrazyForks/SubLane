@@ -4,15 +4,21 @@ import { useTranslation } from 'react-i18next'
 import { Button } from './ui/Button'
 import { Status } from './Status'
 import type { GatewayStatus } from '@/lib/connection'
+import type { SetupProgress } from '@/lib/activation'
+import { Activation } from './Activation'
 
 export function GatewaySetup({
   status,
   hasUsableKey,
+  setup,
 }: {
   status: GatewayStatus | 'unknown'
   hasUsableKey: boolean | null
+  setup?: SetupProgress
 }) {
   const { t } = useTranslation()
+  if (setup && status !== 'unknown')
+    return <Activation setup={setup} administrator />
   const configured = status === 'ready'
   const ready = configured && hasUsableKey === true
   const needsKey = configured && hasUsableKey === false

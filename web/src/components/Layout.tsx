@@ -1,7 +1,7 @@
+import { DemoNotice } from './DemoNotice'
 import { useId, useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link, Outlet, useRouterState } from '@tanstack/react-router'
-import { DemoNotice } from './DemoNotice'
 import {
   Activity,
   FolderClosed,
@@ -26,6 +26,7 @@ import { Logo } from './Logo'
 import { Session } from './Session'
 import { WorkspaceSelect } from './WorkspaceSelect'
 import { Button } from './ui/Button'
+import { TourProvider, TourButton } from './TourProvider'
 import {
   Sidebar,
   SidebarContent,
@@ -72,6 +73,7 @@ const navigation = [
         label: 'systemSettings',
         icon: Settings,
         children: [
+          { to: '/admin/settings/alerts', label: 'alertsTitle' },
           { to: '/admin/settings/timezone', label: 'timeZoneTitle' },
           { to: '/admin/settings/codex', label: 'codexVersionTitle' },
           { to: '/admin/settings/backup', label: 'backupTitle' },
@@ -84,9 +86,11 @@ const navigation = [
 function NavigationItem({
   item,
   pathname,
+  allowed,
 }: {
   item: (typeof navigation)[number]['items'][number]
   pathname: string
+  allowed: (path: string) => boolean
 }) {
   const { t } = useTranslation()
   const { setOpenMobile } = useSidebar()
@@ -119,25 +123,27 @@ function NavigationItem({
             hidden={!expanded}
             className={!expanded ? 'hidden' : undefined}
           >
-            {item.children.map((child) => (
-              <SidebarMenuSubItem key={child.to}>
-                <SidebarMenuSubButton
-                  asChild
-                  isActive={pathname === child.to}
-                  className="h-auto min-h-9 py-2 [@media(pointer:coarse)]:min-h-11"
-                >
-                  <Link
-                    to={child.to}
-                    aria-current={pathname === child.to ? 'page' : undefined}
-                    onClick={() => setOpenMobile(false)}
+            {item.children
+              .filter((child) => allowed(child.to))
+              .map((child) => (
+                <SidebarMenuSubItem key={child.to}>
+                  <SidebarMenuSubButton
+                    asChild
+                    isActive={pathname === child.to}
+                    className="h-auto min-h-9 py-2 [@media(pointer:coarse)]:min-h-11"
                   >
-                    <span className="whitespace-normal break-words">
-                      {t(child.label)}
-                    </span>
-                  </Link>
-                </SidebarMenuSubButton>
-              </SidebarMenuSubItem>
-            ))}
+                    <Link
+                      to={child.to}
+                      aria-current={pathname === child.to ? 'page' : undefined}
+                      onClick={() => setOpenMobile(false)}
+                    >
+                      <span className="whitespace-normal break-words">
+                        {t(child.label)}
+                      </span>
+                    </Link>
+                  </SidebarMenuSubButton>
+                </SidebarMenuSubItem>
+              ))}
           </SidebarMenuSub>
         </>
       ) : (
@@ -165,6 +171,12 @@ function Navigation() {
   const pathname = useRouterState({ select: (s) => s.location.pathname })
   const { setOpenMobile } = useSidebar()
   const { data } = useQuery(authOptions())
+  const allowed = (path: string) =>
+    canAccess(
+      path,
+      data?.user?.role,
+      data?.user?.id === 1 && selectedWorkspace() === 1,
+    )
   return (
     <Sidebar className="border-r border-border">
       <SidebarHeader className="px-3 py-4">
@@ -182,12 +194,10 @@ function Navigation() {
       </SidebarHeader>
       <SidebarContent className="gap-5">
         {navigation.map((group) => {
-          const items = group.items.filter(({ to }) =>
-            canAccess(
-              to,
-              data?.user?.role,
-              data?.user?.id === 1 && selectedWorkspace() === 1,
-            ),
+          const items = group.items.filter((item) =>
+            'children' in item
+              ? item.children.some((child) => allowed(child.to))
+              : allowed(item.to),
           )
           if (!items.length) return null
           return (
@@ -205,6 +215,7 @@ function Navigation() {
                       key={item.to}
                       item={item}
                       pathname={pathname}
+                      allowed={allowed}
                     />
                   ))}
                 </SidebarMenu>
@@ -222,47 +233,59 @@ function Navigation() {
 
 export function Layout({ children }: { children?: ReactNode }) {
   const { t } = useTranslation()
+  const { data } = useQuery(authOptions())
+  const user = data?.user
+  const workspace = selectedWorkspace()
+  if (!user) return null
   return (
-    <SidebarProvider>
-      <a
-        href="#main-content"
-        className="sr-only z-50 rounded-md bg-primary p-3 text-primary-foreground focus:not-sr-only focus:fixed focus:left-4 focus:top-4"
-      >
-        {t('skipContent')}
-      </a>
-      <Navigation />
-      <SidebarInset className="min-w-0 bg-background">
-        <header className="flex min-h-16 items-center justify-between gap-3 px-4 md:px-6">
-          <div className="flex items-center gap-3">
-            <SidebarTrigger className="size-7 text-muted-foreground [@media(pointer:coarse)]:size-11" />
-          </div>
-          <div className="flex items-center gap-1">
-            <LanguageSelect compact />
-            <ThemeSelect compact />
-            <Button
-              asChild
-              variant="ghost"
-              size="icon"
-              className="text-muted-foreground [@media(pointer:coarse)]:size-11"
-            >
-              <Link
-                to="/preferences"
-                aria-label={t('preferences')}
-                title={t('preferences')}
-              >
-                <Settings aria-hidden="true" />
-              </Link>
-            </Button>
-          </div>
-        </header>
-        <DemoNotice />
-        <main
-          id="main-content"
-          className="mx-auto w-full max-w-6xl px-5 py-6 md:px-6"
+    <TourProvider
+      key={`${user.id}:${user.role}:${workspace}`}
+      userID={user.id}
+      administrator={user.role === 'admin'}
+      workspace={workspace}
+    >
+      <SidebarProvider>
+        <a
+          href="#main-content"
+          className="sr-only z-50 rounded-md bg-primary p-3 text-primary-foreground focus:not-sr-only focus:fixed focus:left-4 focus:top-4"
         >
-          {children ?? <Outlet />}
-        </main>
-      </SidebarInset>
-    </SidebarProvider>
+          {t('skipContent')}
+        </a>
+        <Navigation />
+        <SidebarInset className="min-w-0 bg-background">
+          <header className="flex min-h-16 items-center justify-between gap-3 px-4 md:px-6">
+            <div className="flex items-center gap-3">
+              <SidebarTrigger className="size-7 text-muted-foreground [@media(pointer:coarse)]:size-11" />
+            </div>
+            <div className="flex items-center gap-1">
+              <LanguageSelect compact />
+              <ThemeSelect compact />
+              <TourButton />
+              <Button
+                asChild
+                variant="ghost"
+                size="icon"
+                className="text-muted-foreground [@media(pointer:coarse)]:size-11"
+              >
+                <Link
+                  to="/preferences"
+                  aria-label={t('preferences')}
+                  title={t('preferences')}
+                >
+                  <Settings aria-hidden="true" />
+                </Link>
+              </Button>
+            </div>
+          </header>
+          <DemoNotice />
+          <main
+            id="main-content"
+            className="mx-auto w-full max-w-6xl px-5 py-6 md:px-6"
+          >
+            {children ?? <Outlet />}
+          </main>
+        </SidebarInset>
+      </SidebarProvider>
+    </TourProvider>
   )
 }

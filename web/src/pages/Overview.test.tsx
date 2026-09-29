@@ -172,5 +172,13 @@ it('keeps instance status available to non-owner workspace administrators', asyn
       .getByRole('link', { name: 'Instance status' })
       .getAttribute('aria-current'),
   ).toBe('page')
-  expect(screen.queryByRole('button', { name: 'System settings' })).toBeNull()
+  await userEvent
+    .setup()
+    .click(screen.getByRole('button', { name: 'System settings' }))
+  expect(screen.getByRole('link', { name: 'Workspace alerts' })).toBeTruthy()
+  expect(
+    screen.queryByRole('link', { name: 'Codex client version' }),
+  ).toBeNull()
+  expect(screen.queryByRole('link', { name: 'Time zone' })).toBeNull()
+  expect(screen.queryByRole('link', { name: 'Backup and restore' })).toBeNull()
 })

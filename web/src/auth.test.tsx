@@ -363,6 +363,18 @@ it('revokes access on logout and fetches fresh private data on a new login', asy
       }
       if (url === '/api/workspaces')
         return Promise.resolve(response(workspaces))
+      if (url === '/api/alerts')
+        return Promise.resolve(
+          response({
+            enabled: false,
+            configured: false,
+            destination: '',
+            last_delivered_at: 0,
+            next_retry_at: 0,
+            delivery_failed: false,
+            incidents: [],
+          }),
+        )
       reads++
       return Promise.resolve(
         response({ ...system, version: 'synthetic-' + reads }),

@@ -77,6 +77,19 @@ func (v *Vault) Seal(accountID string, plaintext []byte) ([]byte, error) {
 	return v.seal("sublane:account:"+accountID, plaintext)
 }
 
+func (v *Vault) SealWebhook(tenantID int64, plaintext []byte) ([]byte, error) {
+	if tenantID <= 0 {
+		return nil, ErrDecrypt
+	}
+	return v.seal(fmt.Sprintf("sublane:webhook:%d", tenantID), plaintext)
+}
+func (v *Vault) OpenWebhook(tenantID int64, encrypted []byte) ([]byte, error) {
+	if tenantID <= 0 {
+		return nil, ErrDecrypt
+	}
+	return v.open(fmt.Sprintf("sublane:webhook:%d", tenantID), encrypted)
+}
+
 func (v *Vault) seal(binding string, plaintext []byte) ([]byte, error) {
 	nonce := make([]byte, v.aead.NonceSize())
 	_, _ = rand.Read(nonce)

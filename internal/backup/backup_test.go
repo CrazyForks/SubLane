@@ -8,12 +8,47 @@ import (
 	"time"
 
 	"github.com/murongg/SubLane/internal/accounts"
+	"github.com/murongg/SubLane/internal/alerts"
 	"github.com/murongg/SubLane/internal/apikey"
 	"github.com/murongg/SubLane/internal/auth"
 	"github.com/murongg/SubLane/internal/groups"
 	"github.com/murongg/SubLane/internal/storage"
 	"github.com/murongg/SubLane/internal/vault"
 )
+
+func TestBackupVerifiesWebhookOnlyCredentials(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	conn, err := storage.Open(ctx, filepath.Join(dir, databaseName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	identity, err := auth.New(conn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := identity.Setup(ctx, "synthetic-owner", "synthetic-password", "Synthetic"); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, keyName)
+	v, err := vault.Open(path, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := alerts.New(conn, v, nil).Update(ctx, 1, alerts.Input{URL: "https://hooks.example.test/events"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := verifyCredentials(ctx, conn, dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, make([]byte, 32), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := verifyCredentials(ctx, conn, dir); err == nil {
+		t.Fatal("incorrect webhook key accepted")
+	}
+}
 
 func TestBackupRoundTripPreservesDataAndRevokesRestoredSessions(t *testing.T) {
 	ctx := context.Background()
@@ -155,12 +190,15 @@ func TestFormerProxyCheckArchiveStillRestores(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Keep this archive on its historical schema so restore exercises newer migrations.
-	if _, err := connection.ExecContext(ctx, `ALTER TABLE request_records DROP COLUMN reasoning_effort;
+	if _, err := connection.ExecContext(ctx, `DROP TABLE alert_states;
+ALTER TABLE tenants DROP COLUMN alert_config;
+ALTER TABLE memberships DROP COLUMN first_request_at;
+ALTER TABLE request_records DROP COLUMN reasoning_effort;
 ALTER TABLE memberships DROP COLUMN max_concurrency;
 ALTER TABLE memberships ADD COLUMN max_concurrency INTEGER NOT NULL DEFAULT 0 CHECK(max_concurrency BETWEEN 0 AND 8);
 ALTER TABLE accounts DROP COLUMN max_concurrency;
 ALTER TABLE accounts ADD COLUMN max_concurrency INTEGER NOT NULL DEFAULT 2 CHECK(max_concurrency BETWEEN 1 AND 8);
-DELETE FROM schema_migrations WHERE name IN ('006_reasoning_effort.sql','007_member_concurrency.sql','008_account_concurrency.sql');
+DELETE FROM schema_migrations WHERE name >= '006_reasoning_effort.sql';
 INSERT INTO schema_migrations(name) VALUES('004_proxy_checks.sql')`); err != nil {
 		t.Fatal(err)
 	}

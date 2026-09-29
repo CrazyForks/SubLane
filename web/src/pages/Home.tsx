@@ -6,6 +6,7 @@ import { getSystem } from '@/lib/api'
 import { Status } from '@/components/Status'
 import { Button } from '@/components/ui/Button'
 import { Usage } from './Usage'
+import { Activation, PersonalActivation } from '@/components/Activation'
 
 export function Home() {
   const { data } = useQuery(authOptions())
@@ -37,15 +38,7 @@ export function Home() {
               </div>
             </dl>
           </section>
-          <section>
-            <h2 className="font-semibold">{t('clientAccess')}</h2>
-            <p className="mt-2 text-sm leading-6 text-muted-foreground">
-              {t('memberAccessDescription')}
-            </p>
-            <Button asChild variant="outline" className="mt-4">
-              <Link to="/keys">{t('manageKeys')}</Link>
-            </Button>
-          </section>
+          <PersonalActivation userID={user.id} />
         </div>
       )}
       <Usage />
@@ -84,6 +77,8 @@ function AdminHome() {
             {t('reconnect')}
           </Button>
         </div>
+      ) : gateway?.setup && gateway.setup.stage !== 'complete' ? (
+        <Activation setup={gateway.setup} administrator />
       ) : gateway && !ready ? (
         <section
           aria-labelledby="gateway-prompt-title"

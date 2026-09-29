@@ -80,6 +80,7 @@ export function Overview() {
       {data && (
         <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1.4fr)_minmax(16rem,1fr)]">
           <GatewaySetup
+            setup={data.gateway.setup}
             status={query.isError ? 'unknown' : data.gateway.status}
             hasUsableKey={query.isError ? null : data.gateway.has_usable_key}
           />

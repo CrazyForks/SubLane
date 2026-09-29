@@ -7,6 +7,86 @@ export const zh: Record<keyof typeof en, string> = {
   demoCredentials: '用户名：{{username}} · 密码：{{password}}',
   demoExplore: '进入演示',
   demoReadOnly: '演示模式不支持修改，你可以继续浏览和筛选示例数据。',
+  tourStart: '开始分步引导',
+  tourOpen: '接入引导',
+  tourAccessWaiting: '管理员授权后，点击“检查进度”继续。',
+  tourTitle: '分步接入引导',
+  tourStep: '第 {{current}} 步，共 {{total}} 步',
+  tourSkip: '跳过引导',
+  tourPrevious: '上一步',
+  tourNext: '下一步',
+  tourFinish: '完成引导',
+  tourCheck: '检查进度',
+  tourStepDone: '此步骤已完成，准备好后可进入下一步。',
+  tourWaiting: '请完成高亮位置的操作，确认成功后即可进入下一步。',
+  tourUnavailable: '暂时无法确认进度，请检查后再继续。',
+  tourOpenStep: '前往当前步骤',
+
+  recoveryModel:
+    '打开此密钥的接入指南，从可用目录中选择模型；所需模型不在目录时，请联系管理员。',
+  recoveryUpstream:
+    '检查对应账号的连接、出口代理和冷却状态，恢复后再重试；已有对话仍绑定原账号。',
+  alertsSaving: '保存中…',
+  recoveryAllocations: '检查用量分配',
+  alertsTitle: '工作空间告警',
+  alertsEnabled: '通知已启用',
+  alertsDisabled: '通知未启用',
+  alertsConfigure: '配置告警',
+  alertsDescription:
+    '当账号需要重新授权、账号池没有已验证可用的账号，或生成失败增多时，接收 Webhook 通知。',
+  alertsUnavailable: '无法读取或保存告警设置，请重试。',
+  alertsDeliveryFailed: 'Webhook 投递失败。请检查接收端，系统将自动重试。',
+  alertsNeverDelivered:
+    '尚未成功投递通知；只有接收端接受事件后，才能确认地址可用。',
+  alertsLastDelivered: '最近成功投递：{{date}}',
+  alertsPayload:
+    '每分钟检查一次。仅发送事件 ID、工作空间及资源 ID、事件类型、状态变化和时间。相同故障去重，恢复后另发通知。',
+  alertsEnable: '启用通知',
+  alertsURL: 'Webhook 地址',
+  alertsURLHint: '使用可接受 JSON POST 请求的公网 HTTPS 地址。地址加密保存。',
+  alertsKeepURL: '留空保留已加密的地址；填写新地址可替换。',
+  alertsClear: '移除已保存地址并关闭通知',
+  alertsInvalid:
+    '请输入不含用户名、密码和片段的公网 HTTPS 地址。启用通知必须配置地址。',
+  alertReauthorization: '账号需要重新授权',
+  alertPoolUnavailable: '账号池没有已验证可用的账号',
+  alertRequestFailures: '生成失败增多',
+
+  clientConfigureKey: '配置 {{name}}',
+  clientCatalogUnavailable:
+    '此密钥暂无可用模型目录。请刷新，或联系管理员检查账号池。',
+  clientCheckRequest: '检查首次调用',
+  recoveryTitle: '下一步怎么处理',
+  recoveryWait: '请稍后重试。连续立即重试不会释放并发槽位或结束冷却。',
+  recoveryContext: '在客户端缩短上下文，或开启新对话。',
+  recoveryQuota:
+    '订阅额度已耗尽，请与管理员确认重置时间。已有对话仍绑定原账号。',
+  recoveryAdmin:
+    '打开对应设置，检查此请求的账号池与账号；处理原因后，再让调用者重试。',
+  recoveryContact:
+    '复制上方请求 ID 发给工作空间管理员，由管理员处理账号、账号池权限或用量分配。',
+  recoveryUnknown:
+    '保留上方请求 ID；如果重试仍失败，请交给工作空间管理员排查。',
+
+  activationTitle: '完成第一次调用',
+  activationAccount: '接入订阅账号',
+  activationAccountHint: '先在当前工作空间接入并启用一个 Codex 订阅账号。',
+  activationVerify: '验证账号连接',
+  activationVerifyHint: '打开订阅账号，验证连接后再将它加入账号池。',
+  activationPool: '将账号加入已启用的账号池',
+  activationPoolHint: '账号已接通。请创建或启用账号池，并加入已验证的账号。',
+  activationPoolAction: '设置账号池',
+  activationAccess: '获得账号池权限',
+  activationAccessHint: '请联系当前工作空间管理员，授权一个已就绪的账号池。',
+  activationKey: '创建个人 API 密钥',
+  activationKeyHint: '为账号池创建或启用一个个人密钥。',
+  activationClient: '配置客户端并发送一条消息',
+  activationClientHint:
+    '打开密钥的配置指南，选择可用模型并发送一条消息。网关记录到你的一次成功生成后，此步骤自动完成。',
+  activationComplete: '第一次调用已成功',
+  activationCompleteHint: '已记录你在当前工作空间的一次成功生成。',
+  activationRequests: '查看我的请求',
+
   workspaceChooseTitle: '选择工作空间',
   workspaceChooseDescription: '请选择一个可用的工作空间继续。',
   workspaceNoneActive: '你目前没有可访问的工作空间。',
@@ -280,6 +360,7 @@ export const zh: Record<keyof typeof en, string> = {
   auditBackupVerify: '校验备份',
   systemSettings: '系统设置',
   systemSettingsDescription: '设置影响所有工作空间。',
+  workspaceSettingsDescription: '设置仅影响当前工作空间。',
   timeZoneTitle: '时区',
   timeZoneDescription:
     '控制整个实例显示的时间和每日／每月用量分配的重置时间。历史运行统计图仍沿用 UTC 分组。',

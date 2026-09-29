@@ -25,6 +25,15 @@ function memberSession() {
   const fetchMock = vi.fn().mockImplementation((url: string) => {
     if (url === '/api/workspaces')
       return Promise.resolve(new Response(JSON.stringify(workspaces)))
+    if (url === '/api/connection')
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            status: 'not_configured',
+            setup: { stage: 'access', has_successful_request: false },
+          }),
+        ),
+      )
     if (url !== '/api/auth/state')
       return Promise.reject(new Error('Unexpected management request'))
     return Promise.resolve(new Response(JSON.stringify(memberAuthenticated)))
@@ -38,6 +47,10 @@ it('gives members their own workspace without management navigation or requests'
   const user = userEvent.setup()
   open('/')
   await screen.findByRole('heading', { name: 'Your workspace' })
+  await screen.findByRole('heading', { name: 'Complete your first request' })
+  expect(screen.getAllByRole('link', { name: 'Manage API keys' })).toHaveLength(
+    1,
+  )
   expect(screen.queryByRole('link', { name: 'Accounts' })).toBeNull()
   expect(screen.queryByRole('link', { name: 'Members' })).toBeNull()
   expect(screen.getByRole('link', { name: 'Requests' })).toBeTruthy()
@@ -48,7 +61,10 @@ it('gives members their own workspace without management navigation or requests'
   await screen.findByRole('heading', { name: 'Preferences' })
   expect(
     fetchMock.mock.calls.every(
-      ([url]) => url === '/api/auth/state' || url === '/api/workspaces',
+      ([url]) =>
+        url === '/api/auth/state' ||
+        url === '/api/workspaces' ||
+        url === '/api/connection',
     ),
   ).toBe(true)
 })
@@ -96,6 +112,7 @@ it.each([
   '/admin/settings',
   '/admin/settings/codex',
   '/admin/settings/backup',
+  '/admin/settings/alerts',
 ])(
   'denies member direct access to %s before loading management data',
   async (path) => {
@@ -107,7 +124,10 @@ it.each([
     await screen.findByRole('heading', { name: 'Your workspace' })
     expect(
       fetchMock.mock.calls.every(
-        ([url]) => url === '/api/auth/state' || url === '/api/workspaces',
+        ([url]) =>
+          url === '/api/auth/state' ||
+          url === '/api/workspaces' ||
+          url === '/api/connection',
       ),
     ).toBe(true)
   },
