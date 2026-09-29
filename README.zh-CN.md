@@ -35,6 +35,14 @@ SubLane 将 AI 订阅账号整合为统一网关，并用独立工作空间隔�
 - **运维与观测：** 提供个人和工作空间用量图表、活动热力图、请求诊断、管理审计日志、备份、校验与恢复，以及 Codex 客户端版本设置。
 - **管理界面：** 内置中英文 Web 界面，支持明暗主题。
 
+## 软件截图
+
+以下截图来自只读演示模式，使用示例数据。点击缩略图可查看原图。
+
+| 工作空间概览 | 订阅账号 | 团队用量 |
+| --- | --- | --- |
+| [<img src="docs/assets/screenshots/overview-zh-light.png" alt="工作空间概览：请求统计、用量趋势与活动热力图" width="220">](docs/assets/screenshots/overview-zh-light.png) | [<img src="docs/assets/screenshots/accounts-zh-light.png" alt="订阅账号：额度快照、验证状态与并发情况" width="220">](docs/assets/screenshots/accounts-zh-light.png) | [<img src="docs/assets/screenshots/usage-zh-light.png" alt="团队用量：请求统计、Token 总量与活动热力图" width="220">](docs/assets/screenshots/usage-zh-light.png) |
+
 ## 快速开始
 
 安装 curl 和校验工具后，运行交互式安装脚本，选择 Docker Compose 或 Linux 预编译二进制，以及不使用代理、Caddy 或 Nginx：

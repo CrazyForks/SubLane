@@ -35,6 +35,14 @@ SubLane brings AI subscriptions into one gateway with isolated workspaces for di
 - **Operations:** Personal and workspace usage charts, activity heatmaps, request diagnostics, management audit logs, backup creation, verification and restore, and Codex client version settings.
 - **Dashboard:** Embedded web interface in English and Simplified Chinese, with light and dark themes.
 
+## Screenshots
+
+Captured from the read-only demo with sample data. Click a preview to view the full image.
+
+| Workspace overview | Subscription accounts | Team usage |
+| --- | --- | --- |
+| [<img src="docs/assets/screenshots/overview-en-light.png" alt="Workspace overview with request statistics, usage trends and an activity heatmap" width="220">](docs/assets/screenshots/overview-en-light.png) | [<img src="docs/assets/screenshots/accounts-en-light.png" alt="Subscription accounts with quota snapshots, verification status and concurrency" width="220">](docs/assets/screenshots/accounts-en-light.png) | [<img src="docs/assets/screenshots/usage-en-light.png" alt="Team usage with request statistics, token totals and an activity heatmap" width="220">](docs/assets/screenshots/usage-en-light.png) |
+
 ## Quick start
 
 Run the guided installer with curl and a checksum utility. Choose Docker Compose or the published Linux binary, then choose no proxy, Caddy, or Nginx:
