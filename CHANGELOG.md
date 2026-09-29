@@ -2,6 +2,23 @@
 
 All notable changes are documented here in [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
+## [0.1.0] - 2026-09-29
+
+### Added
+
+- Add apply_now option and fix quota exhausted 403 status
+- Show estimated USD cost
+- Default member concurrency to 10
+- Raise workspace request capacity to 30
+- Add multi-client CC Switch import and Cline setup
+
+### Fixed
+
+- Load allowance recipients by workspace
+- Record and display reasoning effort
+- Allow configurable 128 MiB request bodies
+- Align concurrency limits with persisted settings
+- Preserve availability during credential refresh failures (#52)
 ## [0.1.0-rc.9] - 2026-09-27
 
 ### Added
@@ -120,6 +137,7 @@ All notable changes are documented here in [Keep a Changelog](https://keepachang
 - Distinguish remaining quota with status colors
 - Restore version-gated model discovery
 
+[0.1.0]: https://github.com/murongg/SubLane/compare/v0.1.0-rc.9...v0.1.0
 [0.1.0-rc.9]: https://github.com/murongg/SubLane/compare/v0.1.0-rc.8...v0.1.0-rc.9
 [0.1.0-rc.8]: https://github.com/murongg/SubLane/compare/v0.1.0-rc.7...v0.1.0-rc.8
 [0.1.0-rc.7]: https://github.com/murongg/SubLane/compare/v0.1.0-rc.6...v0.1.0-rc.7
