@@ -134,6 +134,123 @@ function install(f, args = [], piped = false) {
   });
 }
 
+function terminal(f, source, steps, args = [], term = "xterm") {
+  const harness = fileURLToPath(new URL("./install-pty.py", import.meta.url));
+  const env = { ...f.env, TERM: term };
+  delete env.NO_COLOR;
+  const result = spawnSync("python3", [harness], {
+    cwd: f.root,
+    env,
+    input: JSON.stringify({ source, steps, args }),
+    encoding: "utf8",
+    timeout: 12000,
+  });
+  assert.equal(result.status, 0, result.stderr || result.error?.message);
+  const interaction = JSON.parse(result.stdout);
+  assert.equal(interaction.error, null, interaction.output || interaction.error);
+  return interaction;
+}
+
+function selectionSource() {
+  return readFileSync(script, "utf8").replace(/\nmain "\$@"\s*$/, `
+selection=$(prompt_select 'Instance mode' 'Normal instance' 'Read-only demo')
+printf '\\nSelected: %s\\n' "$selection"
+`);
+}
+
+for (const [name, keys, expected] of [
+  ["default", "\n", "1"],
+  ["down arrow", "\x1b[B\n", "2"],
+  ["up arrow wraparound", "\x1b[A\n", "2"],
+  ["down then up", "\x1b[B\x1b[A\n", "1"],
+  ["application arrow keys", "\x1bOB\n", "2"],
+  ["number shortcut", "2\n", "2"],
+  ["invalid shortcut", "9\n", "1"],
+]) {
+  test(`terminal selector accepts ${name} and restores the terminal`, (t) => {
+    const f = fixture(t);
+    const interaction = terminal(f, selectionSource(), [{ wait: "Read-only demo", send: keys, raw: true }]);
+    assert.equal(interaction.status, 0, interaction.output);
+    assert.match(interaction.output, new RegExp(`Selected: ${expected}`));
+    assert.match(interaction.output, /\x1b\[7m/);
+    assert.match(interaction.output, /\x1b\[\?25h/);
+    assert.equal(interaction.restored, true, `${interaction.output}\n${JSON.stringify(interaction.changes)}`);
+  });
+}
+
+for (const [name, keys] of [["Ctrl+C", "\x03"], ["Escape", "\x1b"], ["Ctrl+D", "\x04"]]) {
+  test(`terminal selector cancels on ${name} and restores the terminal`, (t) => {
+    const f = fixture(t);
+    const interaction = terminal(f, selectionSource(), [{ wait: "Read-only demo", send: keys, raw: true }]);
+    assert.notEqual(interaction.status, 0);
+    assert.doesNotMatch(interaction.output, /Selected:/);
+    assert.match(interaction.output, /\x1b\[\?25h/);
+    assert.equal(interaction.restored, true, `${interaction.output}\n${JSON.stringify(interaction.changes)}`);
+  });
+}
+
+test("terminal selector falls back to a validated numbered prompt for TERM=dumb", (t) => {
+  const f = fixture(t);
+  const interaction = terminal(f, selectionSource(), [
+    { wait: "(default 1):", send: "9\n" },
+    { wait: "Choose a number from 1 to 2", send: "2\n" },
+  ], [], "dumb");
+  assert.equal(interaction.status, 0, interaction.output);
+  assert.match(interaction.output, /Selected: 2/);
+  assert.doesNotMatch(interaction.output, /\x1b/);
+  assert.equal(interaction.restored, true);
+});
+
+test("piped installer uses terminal selectors for runtime, mode and proxy", (t) => {
+  const f = fixture(t);
+  const interaction = terminal(f, readFileSync(script, "utf8"), [
+    { wait: "Linux binary", send: "\n", raw: true },
+    { wait: "Read-only demo", send: "\x1b[B\n", raw: true },
+    { wait: "Nginx", send: "\x1b[B\n", raw: true },
+    { wait: "Public HTTPS domain", send: "gateway.example.test\n" },
+    { wait: "Proceed with this installation?", send: "y\n" },
+  ], ["--version", "1.2.3"]);
+  assert.equal(interaction.status, 0, interaction.output);
+  assert.equal(interaction.restored, true);
+  const settings = readFileSync(join(f.target, ".env"), "utf8");
+  assert.match(settings, /^SUBLANE_DEMO=true$/m);
+  assert.match(settings, /^SUBLANE_PUBLIC_URL=https:\/\/gateway\.example\.test$/m);
+  assert.ok(existsSync(join(f.target, "Caddyfile")));
+});
+
+test("piped installer skips terminal selectors for explicitly supplied choices", (t) => {
+  const f = fixture(t);
+  const interaction = terminal(f, readFileSync(script, "utf8"), [], [
+    "--version", "1.2.3", "--runtime", "docker", "--demo", "--proxy", "none",
+  ]);
+  assert.equal(interaction.status, 0, interaction.output);
+  assert.doesNotMatch(interaction.output, /Use.*Enter/);
+  assert.equal(interaction.restored, true);
+  assert.ok(existsSync(join(f.target, ".env")));
+});
+
+test("non-interactive installer skips selectors even with a controlling terminal", (t) => {
+  const f = fixture(t);
+  const interaction = terminal(f, readFileSync(script, "utf8"), [], [
+    "--version", "1.2.3", "--non-interactive",
+  ]);
+  assert.equal(interaction.status, 0, interaction.output);
+  assert.doesNotMatch(interaction.output, /Use.*Enter/);
+  assert.equal(interaction.restored, true);
+  assert.match(readFileSync(join(f.target, ".env"), "utf8"), /^SUBLANE_DEMO=false$/m);
+});
+
+test("canceling a terminal selector stops installation before downloads or deployment", (t) => {
+  const f = fixture(t);
+  const interaction = terminal(f, readFileSync(script, "utf8"), [
+    { wait: "Linux binary", send: "\x03", raw: true },
+  ], ["--version", "1.2.3"]);
+  assert.notEqual(interaction.status, 0);
+  assert.equal(interaction.restored, true, `${interaction.output}\n${JSON.stringify(interaction.changes)}`);
+  assert.equal(existsSync(f.target), false);
+  assert.equal(f.calls().length, 0);
+});
+
 for (const runtime of ["docker", "binary"]) {
   test(`rejects an occupied ${runtime} port before downloading or starting services`, (t) => {
     const f = fixture(t);
@@ -252,9 +369,14 @@ for (const [choice, demo] of [["", "false"], ["1", "false"], ["2", "true"]]) {
     const f = fixture(t);
     const source = readFileSync(script, "utf8").replace(/\nmain "\$@"\s*$/, `
 prompt_available() { return 0; }
-prompt_choice() {
+prompt_select() {
   case "$1" in
     'Instance mode'*) printf '${choice}' ;;
+    *) printf 'Unexpected selector: %s' "$1" >&2; return 1 ;;
+  esac
+}
+prompt_choice() {
+  case "$1" in
     'Proceed with this installation'*) printf 'y' ;;
     *) printf 'Unexpected prompt: %s' "$1" >&2; return 1 ;;
   esac

@@ -28,7 +28,8 @@ Usage: bash install.sh [--version VERSION] [--dir DIRECTORY] [--port PORT]
   --non-interactive  Use defaults for omitted choices, even with a terminal
   --help             Show this help
 
-An interactive terminal guides the choices. Without one, defaults are a normal
+An interactive terminal guides choices with Up/Down and Enter (or number keys).
+Basic terminals use numbered prompts. Without a terminal, defaults are a normal
 instance, Docker and no proxy; pass flags to choose otherwise. Proxy files are
 generated for review but are never installed into Caddy or Nginx automatically.
 
@@ -98,6 +99,75 @@ prompt_choice() {
   printf '%s' "$1" >/dev/tty
   IFS= read -r answer </dev/tty || fail 'Could not read the terminal choice.'
   printf '%s' "$answer"
+}
+
+# Call in command substitution so selector traps stay separate from installer cleanup.
+prompt_select() {
+  local title=$1 selected=1 key sequence index answer
+  shift
+  local -a options=("$@")
+
+  if [[ -z ${TERM:-} || $TERM == dumb || $TERM == unknown ]] || ! command -v stty >/dev/null; then
+    printf '\n%s\n' "$title" >/dev/tty
+    for ((index=0; index<${#options[@]}; index++)); do
+      printf '  %d. %s\n' "$((index+1))" "${options[index]}" >/dev/tty
+    done
+    while true; do
+      answer=$(prompt_choice "$title [1-${#options[@]}] (default 1): ")
+      answer=${answer:-1}
+      if [[ $answer =~ ^[1-9]$ && $answer -le ${#options[@]} ]]; then
+        printf '%s' "$answer"
+        return
+      fi
+      printf 'Choose a number from 1 to %s.\n' "${#options[@]}" >/dev/tty
+    done
+  fi
+
+  # Read keys from the controlling terminal, never from the curl | bash source pipe.
+  exec 3<>/dev/tty || fail 'Could not open the terminal selector.'
+  # Function locals are unwound before EXIT on errors; keep saved state in the isolated subshell.
+  selector_terminal_state=$(stty -g <&3) || fail 'Could not read terminal settings.'
+  # Keep terminal cleanup inside this subshell so cancellation also restores echo and the cursor.
+  trap 'printf "\033[0m\033[?25h" >&3; stty "$selector_terminal_state" <&3' EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM HUP
+
+  render_options() {
+    for ((index=0; index<${#options[@]}; index++)); do
+      printf '\r\033[2K' >&3
+      if [[ $((index+1)) == "$selected" ]]; then
+        if [[ -z ${NO_COLOR+x} ]]; then printf '\033[7m' >&3; fi
+        printf '  > %d. %s' "$((index+1))" "${options[index]}" >&3
+        printf '\033[0m\n' >&3
+      else
+        printf '    %d. %s\n' "$((index+1))" "${options[index]}" >&3
+      fi
+    done
+  }
+
+  printf '\n%s\n  Use Up/Down or a number, then Enter to confirm. Esc cancels.\n\033[?25l' "$title" >&3
+  render_options
+  while true; do
+    # Let read manage key input modes; a manually set raw mode would be restored after SIGINT.
+    IFS= read -r -s -n 1 key <&3 || fail 'Could not read the terminal selection.'
+    case "$key" in
+      ''|$'\r') printf '%s' "$selected"; return ;;
+      $'\004') fail 'Installation canceled before deployment.' ;;
+      $'\033')
+        sequence=''
+        IFS= read -r -s -n 2 -t 1 sequence <&3 || fail 'Installation canceled before deployment.'
+        case "$sequence" in
+          '[A'|OA) selected=$(((selected+${#options[@]}-2)%${#options[@]}+1)) ;;
+          '[B'|OB) selected=$((selected%${#options[@]}+1)) ;;
+        esac
+        ;;
+      [1-9])
+        if [[ $key -le ${#options[@]} ]]; then selected=$key; fi
+        ;;
+    esac
+    printf '\033[%sA' "${#options[@]}" >&3
+    render_options
+  done
 }
 
 validate_domain() {
@@ -449,7 +519,7 @@ main() {
 
   if [[ -z $install_runtime ]] && prompt_available; then
     local choice
-    choice=$(prompt_choice 'Runtime [1 Docker, 2 Linux binary] (default 1): ')
+    choice=$(prompt_select 'Runtime' 'Docker Compose' 'Linux binary')
     case "$choice" in
       ''|1) install_runtime=docker ;;
       2) install_runtime=binary ;;
@@ -462,7 +532,7 @@ main() {
 
   if [[ -z $install_demo ]] && prompt_available; then
     local choice
-    choice=$(prompt_choice 'Instance mode [1 normal, 2 read-only demo] (default 1): ')
+    choice=$(prompt_select 'Instance mode' 'Normal instance' 'Read-only demo')
     case "$choice" in
       ''|1) install_demo=false ;;
       2) install_demo=true ;;
@@ -474,7 +544,7 @@ main() {
 
   if [[ -z $install_proxy ]] && prompt_available; then
     local choice
-    choice=$(prompt_choice 'Reverse proxy [1 none, 2 Caddy, 3 Nginx] (default 1): ')
+    choice=$(prompt_select 'Reverse proxy' 'None' 'Caddy' 'Nginx')
     case "$choice" in
       ''|1) install_proxy=none ;;
       2) install_proxy=caddy ;;
