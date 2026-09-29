@@ -6,6 +6,8 @@ import {
   mkdtempSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
+  realpathSync,
   rmSync,
   statSync,
   symlinkSync,
@@ -44,7 +46,18 @@ const path = require('node:path');
 const command = path.basename(process.argv[1]);
 const args = process.argv.slice(2);
 const mode = process.env.INSTALL_TEST_MODE;
-fs.appendFileSync(process.env.INSTALL_TEST_LOG, JSON.stringify({command, args, image: process.env.SUBLANE_IMAGE, port: process.env.SUBLANE_PORT, demo: process.env.SUBLANE_DEMO}) + '\\n');
+const envPath = args.includes('--env-file') ? args[args.indexOf('--env-file') + 1] : null;
+const settings = envPath ? fs.readFileSync(envPath, 'utf8') : '';
+const values = Object.fromEntries(settings.split('\\n').filter(line => /^[A-Z_]+=/.test(line)).map(line => {
+  const index = line.indexOf('=');
+  return [line.slice(0, index), line.slice(index + 1)];
+}));
+fs.appendFileSync(process.env.INSTALL_TEST_LOG, JSON.stringify({command, args, settings,
+  image: process.env.SUBLANE_IMAGE ?? values.SUBLANE_IMAGE,
+  port: process.env.SUBLANE_PORT ?? values.SUBLANE_PORT,
+  demo: process.env.SUBLANE_DEMO ?? values.SUBLANE_DEMO,
+  logLevel: process.env.SUBLANE_LOG_LEVEL ?? values.SUBLANE_LOG_LEVEL,
+  maxBody: process.env.SUBLANE_MAX_REQUEST_BODY_MB ?? values.SUBLANE_MAX_REQUEST_BODY_MB}) + '\\n');
 if (command === 'curl') {
   if (mode === 'download-failure') process.exit(22);
   if (args.some(value => value.endsWith('/readyz'))) {
@@ -77,11 +90,15 @@ if (command === 'curl') {
   }
 } else if (command === 'docker') {
   if (args[0] === 'info' && mode === 'no-engine') process.exit(1);
+  if (args.includes('config') && mode === 'compose-failure') process.exit(1);
+  if (args.includes('config') && args.includes('--images'))
+    process.stdout.write((mode === 'ignored-image' ? 'example.test/unrelated:old' : (process.env.SUBLANE_IMAGE ?? values.SUBLANE_IMAGE)) + '\\n');
   if (args.includes('pull') && mode === 'pull-failure') process.exit(1);
   if (args.includes('up') && mode === 'unhealthy') process.exit(1);
 } else if (command === 'uname') {
   process.stdout.write(args[0] === '-s' ? 'Linux\\n' : 'x86_64\\n');
 } else if (command === 'systemctl') {
+  if (args.includes('restart') && mode === 'restart-failure') process.exit(1);
   if (mode === 'systemd-failure' && args.includes('enable')) process.exit(1);
   if (mode === 'inactive-binary' && args.includes('is-active')) process.exit(1);
 } else if (command === 'ss' || command === 'lsof') {
@@ -133,6 +150,301 @@ function install(f, args = [], piped = false) {
     timeout: 15000,
   });
 }
+
+function existing(t, runtime = "docker", mode = "", directory = "sublane") {
+  const f = fixture(t, mode, {
+    latestStatus: 200,
+    latest: { tag_name: "v1.2.3", draft: false, prerelease: false },
+  });
+  f.target = join(f.root, directory);
+  mkdirSync(f.target);
+  mkdirSync(join(f.target, "data"));
+  writeFileSync(join(f.target, "data", "sublane.db"), "Synthetic database bytes\n");
+  writeFileSync(join(f.target, "data", "credentials.key"), "Synthetic encryption key\n");
+  writeFileSync(join(f.target, "Caddyfile"), "gateway.example.test {\n    reverse_proxy 127.0.0.1:18080\n}\n");
+  f.unit = "sublane-synthetic.service";
+  f.settings = runtime === "docker" ? ".env" : "sublane.env";
+  if (runtime === "docker") {
+    writeFileSync(join(f.target, ".env"), [
+      "# Operator settings",
+      "COMPOSE_PROJECT_NAME=sublane-synthetic",
+      "SUBLANE_IMAGE=ghcr.io/murongg/sublane:1.2.2",
+      "SUBLANE_BIND_ADDRESS=127.0.0.1",
+      "SUBLANE_PORT=18080",
+      "SUBLANE_PUBLIC_URL=https://gateway.example.test",
+      "SUBLANE_TRUSTED_PROXIES=192.0.2.0/24",
+      "SUBLANE_LOG_LEVEL=warn",
+      "SUBLANE_DEMO=true",
+      "SUBLANE_MAX_REQUEST_BODY_MB=256",
+      "CUSTOM_SETTING=keep",
+      "",
+    ].join("\n"));
+    writeFileSync(join(f.target, "docker.compose.yaml"), compose + "# Operator customization\n");
+  } else {
+    writeFileSync(join(f.target, "sublane"), "#!/bin/sh\nprintf 'Synthetic old binary'\n", { mode: 0o755 });
+    writeFileSync(join(f.target, "LICENSE"), "Synthetic old license\n");
+    writeFileSync(join(f.target, "sublane.env"), [
+      "SUBLANE_ADDR=127.0.0.1:18080",
+      "SUBLANE_DATA_DIR=" + join(f.target, "data").replaceAll(" ", "\\ "),
+      "SUBLANE_PUBLIC_URL=https://gateway.example.test",
+      "SUBLANE_TRUSTED_PROXIES=127.0.0.1/32",
+      "SUBLANE_LOG_LEVEL=warn",
+      "SUBLANE_DEMO=true",
+      "SUBLANE_MAX_REQUEST_BODY_MB=256",
+      "",
+    ].join("\n"));
+    writeFileSync(join(f.target, "start.sh"), "#!/usr/bin/env bash\nset -a\n. \"$(dirname \"$0\")/sublane.env\"\nexec \"$(dirname \"$0\")/sublane\"\n", { mode: 0o700 });
+    writeFileSync(join(f.target, f.unit), '[Service]\nExecStart=/bin/bash "' + join(f.target, "start.sh") + '"\n');
+  }
+  f.snapshot = Object.fromEntries(readdirSync(f.target).filter(name => name !== "data")
+    .map(name => [name, readFileSync(join(f.target, name), "utf8")]));
+  return f;
+}
+
+function backups(f) {
+  return readdirSync(f.target).filter(name => name.startsWith(".update-backup."))
+    .map(name => join(f.target, name));
+}
+
+function assertDataPreserved(f) {
+  assert.equal(readFileSync(join(f.target, "data", "sublane.db"), "utf8"), "Synthetic database bytes\n");
+  assert.equal(readFileSync(join(f.target, "data", "credentials.key"), "utf8"), "Synthetic encryption key\n");
+  assert.equal(readFileSync(join(f.target, "Caddyfile"), "utf8"), f.snapshot.Caddyfile);
+  assert.equal(existsSync(join(f.target, ".update-lock")), false);
+}
+
+test("updates an existing Docker deployment to the latest release while preserving its identity and settings", (t) => {
+  const f = existing(t);
+  Object.assign(f.env, {
+    SUBLANE_IMAGE: "example.test/unrelated:image", SUBLANE_PORT: "9099",
+    SUBLANE_LOG_LEVEL: "debug", SUBLANE_DEMO: "false", SUBLANE_MAX_REQUEST_BODY_MB: "1",
+    COMPOSE_PROJECT_NAME: "unrelated-project", COMPOSE_FILE: "/unrelated.yaml",
+  });
+  f.env.INSTALL_TEST_LISTENERS = "LISTEN 0 128 127.0.0.1:18080 *:*\n";
+  const result = install(f, ["--update", "--non-interactive"], true);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /Update complete/);
+  assert.equal(readFileSync(join(f.target, ".env"), "utf8"),
+    f.snapshot[".env"].replace("sublane:1.2.2", "sublane:1.2.3"));
+  assert.equal(readFileSync(join(f.target, "docker.compose.yaml"), "utf8"), f.snapshot["docker.compose.yaml"]);
+  assertDataPreserved(f);
+  const calls = f.calls().filter(call => call.command === "docker" && call.args.includes("--project-name"));
+  assert.ok(calls.some(call => call.args.includes("pull")));
+  const up = calls.find(call => call.args.includes("up"));
+  assert.ok(up.args.includes("--wait") && up.args.includes("--no-build"));
+  for (const call of calls) {
+    assert.equal(call.args[call.args.indexOf("--project-name") + 1], "sublane-synthetic");
+    assert.equal(realpathSync(call.args[call.args.indexOf("--project-directory") + 1]), realpathSync(f.target));
+    assert.equal(call.image, "ghcr.io/murongg/sublane:1.2.3");
+    assert.equal(call.port, "18080");
+    assert.equal(call.demo, "true");
+    assert.equal(call.logLevel, "warn");
+    assert.equal(call.maxBody, "256");
+  }
+  assert.equal(f.calls().some(call => ["ss", "lsof"].includes(call.command)), false);
+  assert.equal(f.calls().some(call => call.args.includes("down") || call.args.includes("rm")), false);
+  assert.equal(backups(f).length, 1);
+  assert.equal(readFileSync(join(backups(f)[0], ".env"), "utf8"), f.snapshot[".env"]);
+});
+
+test("updates a binary deployment in a path with spaces and restarts its existing user service", (t) => {
+  const f = existing(t, "binary", "", "team gateway");
+  const result = install(f, ["--update", "--dir", f.target, "--version", "v1.2.3", "--wait-timeout", "1"], true);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /Update complete/);
+  assert.equal(readFileSync(join(f.target, "sublane"), "utf8"), "#!/bin/sh\nexit 0\n");
+  assert.equal(statSync(join(f.target, "sublane")).mode & 0o100, 0o100);
+  assert.equal(readFileSync(join(f.target, "LICENSE"), "utf8"), "Synthetic license\n");
+  for (const name of [f.settings, "start.sh", f.unit])
+    assert.equal(readFileSync(join(f.target, name), "utf8"), f.snapshot[name]);
+  assertDataPreserved(f);
+  assert.ok(f.calls().some(call => call.command === "systemctl" && call.args.includes("restart") && call.args.includes(f.unit)));
+  assert.ok(f.calls().some(call => call.command === "curl" && call.args.includes("http://127.0.0.1:18080/readyz")));
+  assert.equal(f.calls().some(call => call.command === "docker" || call.args.includes("enable") || call.args.includes("disable")), false);
+  assert.equal(backups(f).length, 1);
+  assert.equal(readFileSync(join(backups(f)[0], "sublane"), "utf8"), f.snapshot.sublane);
+});
+
+for (const runtime of ["docker", "binary"]) {
+  test(runtime + " update rejects failed downloads and corrupt artifacts without changing the deployment", (t) => {
+    for (const mode of ["download-failure", "bad-checksum", "legacy-demo"]) {
+      const f = existing(t, runtime, mode);
+      const result = install(f, ["--update", "--version", "1.2.3"]);
+      assert.notEqual(result.status, 0);
+      assert.match(result.stderr, /Could not download|checksum mismatch|does not support demo mode/i);
+      for (const [name, body] of Object.entries(f.snapshot))
+        assert.equal(readFileSync(join(f.target, name), "utf8"), body, mode + ": " + name);
+      assertDataPreserved(f);
+      assert.equal(f.calls().some(call => call.args.includes("up") || call.args.includes("restart")), false);
+      assert.equal(backups(f).length, 0);
+    }
+  });
+
+  test(runtime + " update retains recovery files and data when the new service fails readiness", (t) => {
+    const f = existing(t, runtime, runtime === "docker" ? "unhealthy" : "unhealthy-binary");
+    const result = install(f, ["--update", "--version", "1.2.3", "--wait-timeout", "1"]);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /ready|healthy/i);
+    assert.match(result.stderr, /backup|previous/i);
+    assert.doesNotMatch(result.stdout, /Update complete/);
+    assertDataPreserved(f);
+    assert.equal(backups(f).length, 1);
+    const name = runtime === "docker" ? ".env" : "sublane";
+    assert.equal(readFileSync(join(backups(f)[0], name), "utf8"), f.snapshot[name]);
+    assert.equal(f.calls().some(call => call.args.includes("down") || call.args.includes("disable") || call.args.includes("rm")), false);
+  });
+}
+
+test("Docker update config and pull failures leave the old image setting intact", (t) => {
+  for (const mode of ["compose-failure", "pull-failure"]) {
+    const f = existing(t, "docker", mode);
+    const result = install(f, ["--update", "--version", "1.2.3"]);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /configuration is invalid|Image pull failed/i);
+    assert.equal(readFileSync(join(f.target, ".env"), "utf8"), f.snapshot[".env"]);
+    assertDataPreserved(f);
+    assert.equal(f.calls().some(call => call.args.includes("up")), false);
+  }
+});
+
+test("Docker update refuses a customized Compose file that ignores the selected image", (t) => {
+  const f = existing(t, "docker", "ignored-image");
+  const result = install(f, ["--update", "--version", "1.2.3"]);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /selected image/i);
+  assert.equal(readFileSync(join(f.target, ".env"), "utf8"), f.snapshot[".env"]);
+  assert.equal(f.calls().some(call => call.args.includes("pull") || call.args.includes("up")), false);
+  assertDataPreserved(f);
+});
+
+test("update rejects malformed or duplicate saved settings and symlinked configuration", (t) => {
+  for (const [name, setting] of [
+    [".env", "COMPOSE_PROJECT_NAME=another-project\n"],
+    [".env", "SUBLANE_PORT=9090\n"],
+    [".env", "COMPOSE_FILE=first.yaml\nCOMPOSE_FILE=second.yaml\n"],
+    [".env", "COMPOSE_FILE=docker.compose.restore.yaml\n"],
+    [".env", "SUBLANE_IMAGE=example.test/image:old\n"],
+  ]) {
+    const f = existing(t);
+    writeFileSync(join(f.target, name), f.snapshot[name] + setting);
+    const settings = readFileSync(join(f.target, name), "utf8");
+    const result = install(f, ["--update", "--version", "1.2.3"]);
+    assert.notEqual(result.status, 0, setting);
+    assert.match(result.stderr, /Duplicate|override/i);
+    assert.equal(readFileSync(join(f.target, name), "utf8"), settings);
+    assert.equal(f.calls().length, 0);
+  }
+  for (const runtime of ["docker", "binary"]) {
+    const f = existing(t, runtime);
+    const original = join(f.root, "original.env");
+    writeFileSync(original, f.snapshot[f.settings]);
+    rmSync(join(f.target, f.settings));
+    symlinkSync(original, join(f.target, f.settings));
+    const result = install(f, ["--update", "--version", "1.2.3"]);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /symlink/i);
+    assert.equal(readFileSync(original, "utf8"), f.snapshot[f.settings]);
+    assert.equal(f.calls().length, 0);
+  }
+});
+
+test("binary update reports a restart failure and retains the previous executable", (t) => {
+  const f = existing(t, "binary", "restart-failure");
+  const result = install(f, ["--update", "--version", "1.2.3", "--wait-timeout", "1"]);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /restart/i);
+  assert.doesNotMatch(result.stdout, /Update complete/);
+  assert.equal(backups(f).length, 1);
+  assert.equal(readFileSync(join(backups(f)[0], "sublane"), "utf8"), f.snapshot.sublane);
+  assertDataPreserved(f);
+});
+
+test("update refuses missing, unrecognized and symlinked installations before downloading", (t) => {
+  for (const kind of ["missing", "unknown", "symlink"]) {
+    const f = fixture(t);
+    if (kind === "unknown") mkdirSync(f.target);
+    if (kind === "symlink") {
+      const original = join(f.root, "original");
+      mkdirSync(original);
+      symlinkSync(original, f.target);
+    }
+    const result = install(f, ["--update", "--version", "1.2.3"]);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /existing|installation|symlink/i);
+    assert.equal(f.calls().length, 0);
+  }
+});
+
+test("update rejects installation options and an existing update lock without changing files", (t) => {
+  for (const args of [
+    ["--port", "9090"], ["--runtime", "binary"], ["--demo"],
+    ["--proxy", "caddy"], ["--domain", "other.example.test"], ["--trusted-proxies", "127.0.0.1/32"],
+  ]) {
+    const f = existing(t);
+    const result = install(f, ["--update", "--version", "1.2.3", ...args]);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /update.*(option|setting)|installation.*option/i);
+    assert.equal(f.calls().length, 0);
+    assertDataPreserved(f);
+  }
+  const f = existing(t);
+  mkdirSync(join(f.target, ".update-lock"));
+  const result = install(f, ["--update", "--version", "1.2.3"]);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /update.*(progress|lock)/i);
+  assert.equal(existsSync(join(f.target, ".update-lock")), true);
+  assert.equal(f.calls().length, 0);
+});
+
+test("update refuses a symlinked installation even when its path has a trailing slash", (t) => {
+  const f = existing(t, "docker", "", "original");
+  const original = f.target;
+  f.target = join(f.root, "linked");
+  symlinkSync(original, f.target);
+  const result = install(f, ["--update", "--dir", f.target + "/", "--version", "1.2.3"]);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /symlink/i);
+  assert.equal(readFileSync(join(original, ".env"), "utf8"), f.snapshot[".env"]);
+  assert.equal(f.calls().length, 0);
+});
+
+test("Docker update refuses a saved recovery override instead of starting the original data path", (t) => {
+  const f = existing(t);
+  writeFileSync(join(f.target, "docker.compose.restore.yaml"), "services:\n  sublane:\n    environment:\n      SUBLANE_DATA_DIR: /data/restore-ready\n");
+  const result = install(f, ["--update", "--version", "1.2.3"]);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /override|manual upgrade/i);
+  assert.equal(readFileSync(join(f.target, ".env"), "utf8"), f.snapshot[".env"]);
+  assert.equal(f.calls().length, 0);
+  assertDataPreserved(f);
+});
+
+test("piped interactive script offers to update an existing installation and confirms before replacing files", (t) => {
+  const f = existing(t);
+  const interaction = terminal(f, readFileSync(script, "utf8"), [
+    { wait: "Update existing instance", send: "\n", raw: true },
+    { wait: "Proceed with this update?", send: "y\n" },
+  ], ["--version", "1.2.3"]);
+  assert.equal(interaction.status, 0, interaction.output);
+  assert.equal(interaction.restored, true);
+  assert.doesNotMatch(interaction.output, /Linux binary|Read-only demo|Reverse proxy/);
+  assert.match(interaction.output, /Update complete/);
+  assertDataPreserved(f);
+});
+
+test("canceling an interactive update leaves the existing installation untouched", (t) => {
+  const f = existing(t);
+  const interaction = terminal(f, readFileSync(script, "utf8"), [
+    { wait: "Proceed with this update?", send: "n\n" },
+  ], ["--update", "--version", "1.2.3"]);
+  assert.notEqual(interaction.status, 0);
+  assert.equal(interaction.restored, true);
+  assert.match(interaction.output, /Update canceled before deployment/);
+  assert.equal(readFileSync(join(f.target, ".env"), "utf8"), f.snapshot[".env"]);
+  assert.equal(f.calls().some(call => call.args.includes("pull") || call.args.includes("up")), false);
+  assert.equal(backups(f).length, 0);
+  assertDataPreserved(f);
+});
 
 function terminal(f, source, steps, args = [], term = "xterm") {
   const harness = fileURLToPath(new URL("./install-pty.py", import.meta.url));

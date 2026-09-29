@@ -8,16 +8,19 @@ fail() {
 
 usage() {
   cat <<'HELP'
-Install SubLane from a published Docker image or Linux binary.
+Install or update SubLane from a published Docker image or Linux binary.
 
 Usage: bash install.sh [--version VERSION] [--dir DIRECTORY] [--port PORT]
                        [--runtime docker|binary] [--proxy none|caddy|nginx]
                        [--domain DOMAIN] [--trusted-proxies CIDRS]
                        [--wait-timeout SECONDS] [--demo] [--non-interactive]
+       bash install.sh --update [--dir DIRECTORY] [--version VERSION]
+                       [--wait-timeout SECONDS] [--non-interactive]
 
+  --update           Update an existing script-managed installation in place
   --version VERSION  Published version, with or without v (default: latest stable,
                      or newest published prerelease when no stable release exists)
-  --dir DIRECTORY    New installation directory (default: ./sublane)
+  --dir DIRECTORY    Installation directory (default: ./sublane)
   --port PORT        Host port on 127.0.0.1 (default: 8080)
   --runtime MODE     Docker Compose or a Linux binary with a systemd user service
   --proxy PROXY      Generate a Caddyfile or Nginx configuration (default: none)
@@ -33,18 +36,25 @@ Basic terminals use numbered prompts. Without a terminal, defaults are a normal
 instance, Docker and no proxy; pass flags to choose otherwise. Proxy files are
 generated for review but are never installed into Caddy or Nginx automatically.
 
-Requires Bash, curl, sha256sum or shasum, and ss or lsof for port checks.
-The selected backend port is checked before download and again before deployment.
+Requires Bash, curl, and sha256sum or shasum.
+New installations also require ss or lsof to check the selected backend port
+before download and again before deployment; updates reuse the existing port.
 Docker mode needs Compose;
 binary mode needs Linux and a working systemd user manager.
 Automatic version selection also requires jq.
-Existing directories are never overwritten. Use the deployment guide for upgrades.
+Existing directories require --update, or an interactive update selection.
+Updates preserve configuration, proxy files, data and the existing service identity.
+Installation-only options cannot be combined with --update.
+Export and verify a database backup before updating. Previous program/configuration
+files are retained in a private .update-backup.* directory; these are not data backups.
+Failed startup never automatically downgrades a potentially migrated database.
 Demo mode requires a compatible release and uses the public login demo / sublane-demo.
 HELP
 }
 
 cleanup() {
   if [[ -n ${install_stage:-} ]]; then rm -rf -- "$install_stage"; fi
+  if [[ -n ${install_lock:-} ]]; then rmdir -- "$install_lock"; fi
 }
 
 # This is only a snapshot; startup readiness must still catch later bind conflicts.
@@ -464,22 +474,241 @@ install_binary() {
     printf 'Verified binary and configuration are retained at %s.\n' "$install_dir" >&2
     fail 'Could not enable the systemd user service. Review the unit and user manager.'
   fi
-  local attempt ready=false
-  for ((attempt=0; attempt<install_wait_timeout; attempt++)); do
-    if systemctl --user is-active --quiet "$install_unit" \
-      && curl --fail --silent --max-time 2 "http://127.0.0.1:$install_port/readyz" >/dev/null 2>&1; then
-      ready=true
-      break
-    fi
-    if ((attempt+1 < install_wait_timeout)); then sleep 1; fi
-  done
-  if [[ $ready != true ]]; then
+  if ! binary_ready; then
     systemctl --user disable --now "$install_unit" >/dev/null 2>&1 || true
     printf 'Verified binary and configuration are retained at %s.\n' "$install_dir" >&2
     fail "The systemd service did not become ready within $install_wait_timeout seconds."
   fi
   printf 'Manage this deployment: systemctl --user status %s\n' "$install_unit"
   printf 'For service availability after logout, check: loginctl show-user %q -p Linger\n' "${USER:-$(id -un)}"
+}
+
+binary_ready() {
+  local attempt
+  for ((attempt=0; attempt<install_wait_timeout; attempt++)); do
+    if systemctl --user is-active --quiet "$install_unit" \
+      && curl --fail --silent --max-time 2 "http://127.0.0.1:$install_port/readyz" >/dev/null 2>&1; then
+      return 0
+    fi
+    if ((attempt+1 < install_wait_timeout)); then sleep 1; fi
+  done
+  return 1
+}
+
+read_setting() {
+  # Configuration is data here: never source a Docker or systemd environment file.
+  awk -v key="$2" '
+    $0 ~ "^[[:space:]]*" key "[[:space:]]*=" {
+      value = substr($0, index($0, "=") + 1)
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
+      quote = substr(value, 1, 1)
+      if ((quote == "\"" || quote == sprintf("%c", 39)) && substr(value, length(value)) == quote)
+        value = substr(value, 2, length(value) - 2)
+      count++
+    }
+    END { if (count > 1) exit 1; print value }
+  ' "$1" || fail "Duplicate or unreadable $2 setting in $1."
+}
+
+load_installation() {
+  [[ -d $install_dir && ! -L $install_dir ]] \
+    || fail 'Update requires an existing installation directory, not a symlink.'
+  command -v awk >/dev/null || fail 'Install awk first.'
+  install_dir=$(cd -- "$install_dir" && pwd -P)
+  if [[ -f $install_dir/.env && -f $install_dir/docker.compose.yaml && ! -e $install_dir/sublane.env ]]; then
+    local image override
+    local -a overrides=("$install_dir"/docker.compose.*.yaml "$install_dir"/docker.compose.*.yml)
+    [[ ! -L $install_dir/.env && ! -L $install_dir/docker.compose.yaml ]] \
+      || fail 'Update does not follow symlinked installation configuration.'
+    install_runtime=docker
+    install_project=$(read_setting "$install_dir/.env" COMPOSE_PROJECT_NAME)
+    [[ $install_project =~ ^sublane-[a-z0-9_-]+$ ]] \
+      || fail 'Update requires the saved Compose project name from a script-managed installation.'
+    install_port=$(read_setting "$install_dir/.env" SUBLANE_PORT)
+    install_port=${install_port:-8080}
+    install_demo=$(read_setting "$install_dir/.env" SUBLANE_DEMO)
+    image=$(read_setting "$install_dir/.env" SUBLANE_IMAGE)
+    [[ -n $image ]] || fail 'Update requires a saved SUBLANE_IMAGE setting.'
+    override=$(read_setting "$install_dir/.env" COMPOSE_FILE)
+    [[ -z $override ]] \
+      || fail 'Use the manual upgrade procedure for installations using Compose override files.'
+    # A restore override may select another SQLite directory even without COMPOSE_FILE in .env.
+    for override in "${overrides[@]}"; do
+      [[ ! -e $override && ! -L $override ]] \
+        || fail "Use the manual upgrade procedure with the saved Compose override: $override."
+    done
+  elif [[ -f $install_dir/sublane.env && -f $install_dir/start.sh && -x $install_dir/sublane ]]; then
+    local name address
+    local -a units=("$install_dir"/sublane-*.service)
+    [[ ${#units[@]} == 1 && -f ${units[0]} && ! -L ${units[0]} ]] \
+      || fail 'Update requires exactly one saved systemd user service unit.'
+    for name in sublane.env start.sh sublane LICENSE THIRD_PARTY_NOTICES.md licenses docs .env.example; do
+      [[ ! -L $install_dir/$name ]] || fail "Update does not follow symlinked installation file $name."
+    done
+    install_runtime=binary
+    install_unit=${units[0]##*/}
+    install_project=${install_unit%.service}
+    [[ $install_project =~ ^sublane-[a-z0-9_-]+$ ]] || fail 'Invalid saved systemd service name.'
+    address=$(read_setting "$install_dir/sublane.env" SUBLANE_ADDR)
+    [[ $address =~ ^(127\.0\.0\.1|0\.0\.0\.0):([1-9][0-9]{0,4})$ ]] \
+      || fail 'Update requires the saved IPv4 service address in sublane.env.'
+    install_port=${BASH_REMATCH[2]}
+    install_demo=$(read_setting "$install_dir/sublane.env" SUBLANE_DEMO)
+  else
+    fail 'Directory is not a recognized script-managed SubLane installation.'
+  fi
+  [[ $install_port =~ ^[1-9][0-9]{0,4}$ && $install_port -le 65535 ]] || fail 'Invalid saved service port.'
+  install_demo=${install_demo:-false}
+  [[ $install_demo == true || $install_demo == false ]] || fail 'Invalid saved SUBLANE_DEMO setting.'
+}
+
+prepare_release() {
+  local dependency
+  for dependency in curl awk mktemp; do
+    command -v "$dependency" >/dev/null || fail "Install $dependency first."
+  done
+  if [[ -z $install_version ]]; then
+    command -v jq >/dev/null || fail 'Install jq for automatic version selection, or pass --version explicitly.'
+  fi
+  if command -v sha256sum >/dev/null; then
+    install_hash=(sha256sum)
+  elif command -v shasum >/dev/null; then
+    install_hash=(shasum -a 256)
+  else
+    fail 'Install sha256sum or shasum first.'
+  fi
+  if [[ $install_runtime == docker ]]; then
+    command -v docker >/dev/null || fail 'Install Docker first.'
+    docker compose version >/dev/null || fail 'Docker Compose is required.'
+    docker info >/dev/null 2>&1 || fail 'Docker is not running or the current user cannot access it.'
+  else
+    for dependency in tar uname systemctl; do
+      command -v "$dependency" >/dev/null || fail "Install $dependency first."
+    done
+    [[ $(uname -s) == Linux ]] || fail 'Published binary installations require Linux.'
+    case "$(uname -m)" in
+      x86_64) install_arch=amd64 ;;
+      aarch64|arm64) install_arch=arm64 ;;
+      *) fail 'Published binaries support Linux amd64 and arm64 only.' ;;
+    esac
+    systemctl --user show-environment >/dev/null 2>&1 || fail 'A running systemd user manager is required for binary mode.'
+  fi
+  umask 077
+  if [[ $install_update == true ]]; then
+    # Same-filesystem staging lets the final rename replace files atomically.
+    install_stage=$(mktemp -d "$install_dir/.update-stage.XXXXXXXX")
+  else
+    install_stage=$(mktemp -d "${TMPDIR:-/tmp}/sublane-install.XXXXXXXX")
+  fi
+  trap cleanup EXIT
+  trap 'exit 130' INT TERM
+  if [[ -z $install_version ]]; then resolve_version; fi
+  validate_version
+  install_release="https://github.com/murongg/SubLane/releases/download/v$install_version"
+  install_image="ghcr.io/murongg/sublane:$install_version"
+}
+
+download_release() {
+  printf 'Downloading deployment files for v%s...\n' "$install_version"
+  if [[ $install_runtime == docker ]]; then
+    install_artifact=docker.compose.yaml
+  else
+    install_artifact="sublane_${install_version}_linux_${install_arch}.tar.gz"
+  fi
+  download "$install_artifact"
+  download SHA256SUMS
+  verify_download "$install_artifact"
+  if [[ $install_runtime == docker ]]; then
+    require_demo_support "$install_stage/docker.compose.yaml"
+  else
+    mkdir "$install_stage/unpacked"
+    tar -tzf "$install_stage/$install_artifact" > "$install_stage/archive.list" || fail 'Invalid binary archive.'
+    local member
+    while IFS= read -r member; do
+      case "$member" in
+        /*|..|../*|*/../*|*/..) fail 'Binary archive contains an unsafe path.' ;;
+      esac
+    done < "$install_stage/archive.list"
+    tar -xzf "$install_stage/$install_artifact" -C "$install_stage/unpacked" || fail 'Could not extract binary archive.'
+    [[ -f $install_stage/unpacked/sublane && ! -L $install_stage/unpacked/sublane && -x $install_stage/unpacked/sublane ]] \
+      || fail 'Binary archive is missing the executable.'
+    require_demo_support "$install_stage/unpacked/.env.example"
+  fi
+}
+
+update_compose() {
+  local directory=$1 variable
+  shift
+  (
+    # Let the saved .env win over unrelated settings inherited from the caller.
+    for variable in ${!SUBLANE_@}; do unset "$variable"; done
+    unset COMPOSE_PROJECT_NAME COMPOSE_FILE COMPOSE_ENV_FILES COMPOSE_PROFILES
+    # Relative bind mounts must resolve against the live deployment, including during pull.
+    docker compose --project-name "$install_project" --project-directory "$install_dir" \
+      --env-file "$directory/.env" -f "$directory/docker.compose.yaml" "$@" </dev/null
+  )
+}
+
+update_failed() {
+  printf 'Previous files are retained at %s; current configuration and data are retained at %s.\n' \
+    "$install_backup" "$install_dir" >&2
+  # An attempted startup may already have migrated SQLite; old binaries are not a safe automatic rollback.
+  printf 'Inspect the service logs. Database recovery may require restoring a verified pre-update backup.\n' >&2
+  fail "$*"
+}
+
+update_installation() {
+  [[ $install_options == false ]] || fail 'Update preserves existing settings; installation-only options cannot be combined with --update.'
+  load_installation
+  umask 077
+  mkdir -- "$install_dir/.update-lock" || fail 'Another update is in progress, or the update lock could not be created.'
+  install_lock=$install_dir/.update-lock
+  trap cleanup EXIT
+  trap 'exit 130' INT TERM
+  prepare_release
+  download_release
+  printf '\nUpdate plan: %s v%s in %s; existing port: %s\n' \
+    "$install_runtime" "$install_version" "$install_dir" "$install_port"
+  printf 'Existing settings, proxy files and data will be preserved. Export and verify a database backup before updating.\n'
+  if prompt_available; then
+    local answer
+    answer=$(prompt_choice 'Proceed with this update? [y/N]: ')
+    [[ $answer == y || $answer == Y ]] || fail 'Update canceled before deployment.'
+  fi
+  if [[ $install_runtime == docker ]]; then
+    # Preserve operator changes to Compose; only the pinned image setting changes.
+    cp "$install_dir/docker.compose.yaml" "$install_stage/docker.compose.yaml"
+    awk -v image="$install_image" '
+      /^[[:space:]]*SUBLANE_IMAGE[[:space:]]*=/ { print "SUBLANE_IMAGE=" image; next }
+      { print }
+    ' "$install_dir/.env" > "$install_stage/.env"
+    update_compose "$install_stage" config --quiet || fail 'Updated Compose configuration is invalid; existing files were left unchanged.'
+    local configured_image
+    configured_image=$(update_compose "$install_stage" config --images sublane) \
+      || fail 'Could not resolve the SubLane image from the existing Compose configuration.'
+    [[ $configured_image == "$install_image" ]] \
+      || fail 'The existing Compose service does not use the selected image. Review its SUBLANE_IMAGE interpolation.'
+    update_compose "$install_stage" pull || fail 'Image pull failed; existing files were left unchanged.'
+    install_backup=$(mktemp -d "$install_dir/.update-backup.XXXXXXXX")
+    cp -p "$install_dir/.env" "$install_dir/docker.compose.yaml" "$install_backup/"
+    mv -- "$install_stage/.env" "$install_dir/.env" || update_failed 'Could not replace the image setting.'
+    update_compose "$install_dir" up --detach --wait --wait-timeout "$install_wait_timeout" --no-build \
+      || update_failed 'Updated SubLane did not become healthy.'
+  else
+    install_backup=$(mktemp -d "$install_dir/.update-backup.XXXXXXXX")
+    cp -p "$install_dir/sublane" "$install_dir/sublane.env" "$install_dir/start.sh" "$install_dir/$install_unit" "$install_backup/"
+    local name
+    for name in LICENSE THIRD_PARTY_NOTICES.md licenses docs .env.example; do
+      if [[ -e $install_stage/unpacked/$name ]]; then
+        if [[ -e $install_dir/$name ]]; then cp -pR "$install_dir/$name" "$install_backup/"; fi
+        cp -R "$install_stage/unpacked/$name" "$install_dir/" || update_failed "Could not update packaged $name."
+      fi
+    done
+    mv -- "$install_stage/unpacked/sublane" "$install_dir/sublane" || update_failed 'Could not replace the executable.'
+    systemctl --user restart "$install_unit" || update_failed 'Could not restart the existing systemd user service.'
+    binary_ready || update_failed "Updated systemd service did not become ready within $install_wait_timeout seconds."
+  fi
+  printf '\nUpdate complete: %s\nPrevious files: %s\n' "$install_dir" "$install_backup"
 }
 
 main() {
@@ -494,10 +723,16 @@ main() {
   install_trusted_proxies=''
   install_no_prompt=false
   install_prompted=false
+  install_update=false
+  install_options=false
+  install_lock=''
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --version|--dir|--port|--runtime|--proxy|--domain|--trusted-proxies|--wait-timeout)
         [[ $# -ge 2 && -n $2 ]] || fail "Missing value for $1."
+        case "$1" in
+          --port|--runtime|--proxy|--domain|--trusted-proxies) install_options=true ;;
+        esac
         case "$1" in
           --version) install_version=${2#v}; validate_version ;;
           --dir) install_dir=$2 ;;
@@ -511,11 +746,29 @@ main() {
         shift 2
         ;;
       --non-interactive) install_no_prompt=true; shift ;;
-      --demo) install_demo=true; shift ;;
+      --update) install_update=true; shift ;;
+      --demo) install_demo=true; install_options=true; shift ;;
       --help|-h) usage; return ;;
       *) fail "Unknown argument: $1. Use --help." ;;
     esac
   done
+
+  [[ $install_wait_timeout =~ ^[1-9][0-9]{0,2}$ && $install_wait_timeout -le 300 ]] \
+    || fail 'Startup wait timeout must be 1 to 300 seconds.'
+  [[ $install_dir != *$'\n'* && $install_dir != *$'\r'* ]] || fail 'Directory cannot contain line breaks.'
+  [[ $install_dir == /* ]] || install_dir=$PWD/$install_dir
+  # A trailing slash hides a directory symlink from Bash's -L check.
+  while [[ $install_dir != / && $install_dir == */ ]]; do install_dir=${install_dir%/}; done
+  if [[ $install_update == false && $install_options == false && -d $install_dir && ! -L $install_dir ]] && prompt_available; then
+    local choice
+    choice=$(prompt_select 'Existing installation' 'Update existing instance' 'Cancel')
+    [[ $choice == 1 ]] || fail 'Update canceled before deployment.'
+    install_update=true
+  fi
+  if [[ $install_update == true ]]; then
+    update_installation
+    return
+  fi
 
   if [[ -z $install_runtime ]] && prompt_available; then
     local choice
@@ -580,86 +833,22 @@ main() {
 
   [[ $install_port =~ ^[1-9][0-9]{0,4}$ ]] || fail 'Port must be an integer from 1 to 65535.'
   [[ $install_port -le 65535 ]] || fail 'Port must be an integer from 1 to 65535.'
-  [[ $install_wait_timeout =~ ^[1-9][0-9]{0,2}$ && $install_wait_timeout -le 300 ]] \
-    || fail 'Startup wait timeout must be 1 to 300 seconds.'
-  [[ $install_dir != *$'\n'* && $install_dir != *$'\r'* ]] || fail 'Directory cannot contain line breaks.'
-  [[ $install_dir == /* ]] || install_dir=$PWD/$install_dir
   if [[ $install_runtime == binary ]]; then
     case "$install_dir" in
       *'%'*|*'$'*|*'"'*|*$'\\'*) fail 'Binary installation directory cannot contain %, $, quotes, or backslashes.' ;;
     esac
   fi
-  [[ ! -e $install_dir && ! -L $install_dir ]] || fail "Directory already exists: $install_dir. Configuration and data were left unchanged."
+  [[ ! -e $install_dir && ! -L $install_dir ]] || fail "Directory already exists: $install_dir. Use --update for a script-managed installation. Configuration and data were left unchanged."
 
-  local dependency
-  for dependency in curl awk mktemp; do
-    command -v "$dependency" >/dev/null || fail "Install $dependency first."
-  done
   check_port
-  if [[ -z $install_version ]]; then
-    command -v jq >/dev/null || fail 'Install jq for automatic version selection, or pass --version explicitly.'
-  fi
-  if command -v sha256sum >/dev/null; then
-    install_hash=(sha256sum)
-  elif command -v shasum >/dev/null; then
-    install_hash=(shasum -a 256)
-  else
-    fail 'Install sha256sum or shasum first.'
-  fi
-  if [[ $install_runtime == docker ]]; then
-    command -v docker >/dev/null || fail 'Install Docker first.'
-    docker compose version >/dev/null || fail 'Docker Compose is required.'
-    docker info >/dev/null 2>&1 || fail 'Docker is not running or the current user cannot access it.'
-  else
-    for dependency in tar uname systemctl; do
-      command -v "$dependency" >/dev/null || fail "Install $dependency first."
-    done
-    [[ $(uname -s) == Linux ]] || fail 'Published binary installations require Linux.'
-    case "$(uname -m)" in
-      x86_64) install_arch=amd64 ;;
-      aarch64|arm64) install_arch=arm64 ;;
-      *) fail 'Published binaries support Linux amd64 and arm64 only.' ;;
-    esac
-    systemctl --user show-environment >/dev/null 2>&1 || fail 'A running systemd user manager is required for binary mode.'
-  fi
-
-  umask 077
-  install_stage=$(mktemp -d "${TMPDIR:-/tmp}/sublane-install.XXXXXXXX")
-  trap cleanup EXIT
-  trap 'exit 130' INT TERM
-  if [[ -z $install_version ]]; then resolve_version; fi
-  validate_version
-  install_release="https://github.com/murongg/SubLane/releases/download/v$install_version"
-  install_image="ghcr.io/murongg/sublane:$install_version"
+  prepare_release
   # Persist a distinct project name so a same-named directory cannot reuse another instance's volume.
   install_project="sublane-$RANDOM-$RANDOM-$$"
 
-  printf 'Downloading deployment files for v%s...\n' "$install_version"
+  download_release
   if [[ $install_runtime == docker ]]; then
-    download docker.compose.yaml
-    install_artifact=docker.compose.yaml
-  else
-    install_artifact="sublane_${install_version}_linux_${install_arch}.tar.gz"
-    download "$install_artifact"
-  fi
-  download SHA256SUMS
-  verify_download "$install_artifact"
-  if [[ $install_runtime == docker ]]; then
-    require_demo_support "$install_stage/docker.compose.yaml"
     write_docker_env
   else
-    mkdir "$install_stage/unpacked"
-    tar -tzf "$install_stage/$install_artifact" > "$install_stage/archive.list" || fail 'Invalid binary archive.'
-    local member
-    while IFS= read -r member; do
-      case "$member" in
-        /*|..|../*|*/../*|*/..) fail 'Binary archive contains an unsafe path.' ;;
-      esac
-    done < "$install_stage/archive.list"
-    tar -xzf "$install_stage/$install_artifact" -C "$install_stage/unpacked" || fail 'Could not extract binary archive.'
-    [[ -f $install_stage/unpacked/sublane && ! -L $install_stage/unpacked/sublane && -x $install_stage/unpacked/sublane ]] \
-      || fail 'Binary archive is missing the executable.'
-    require_demo_support "$install_stage/unpacked/.env.example"
     install_unit="$install_project.service"
     write_binary_files
   fi

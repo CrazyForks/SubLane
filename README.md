@@ -57,7 +57,7 @@ curl -fsSL https://raw.githubusercontent.com/murongg/SubLane/main/scripts/instal
 
 Docker mode requires Docker Compose; binary mode requires Linux and a working systemd user manager. In a non-interactive shell, the installer retains the previous Docker-without-proxy default. Without a public domain, generated proxy configurations listen on local HTTP only. Open the URL printed by the installer, create the administrator, and name your first workspace in the guided setup. Connect a subscription, add it to an account pool, then create a personal key. Follow [First request](https://sublane.dev/docs/quickstart) to complete the connection; additional workspaces and usage limits can wait until you need them.
 
-The script installs the latest stable release, or the newest prerelease if no stable release exists, in `./sublane`. Docker mode uses a named volume; binary mode uses a private data directory and systemd user service. Existing directories are left unchanged. For options, generated proxy files, HTTPS and upgrades, see the [deployment guide](https://sublane.dev/docs/deployment).
+The script installs the latest stable release, or the newest prerelease if no stable release exists, in `./sublane`. Docker mode uses a named volume; binary mode uses a private data directory and systemd user service. For an existing script-managed installation, it offers an update in interactive mode; pass `--update --dir ./sublane` to update explicitly while preserving settings and data. Export and verify a backup before updating. For options, generated proxy files, HTTPS and upgrades, see the [deployment guide](https://sublane.dev/docs/deployment).
 
 ## Development
 
