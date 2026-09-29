@@ -9,6 +9,26 @@ import (
 	"testing"
 )
 
+func TestWebhookEncryptionBindsWorkspaceAndResource(t *testing.T) {
+	v, err := Open(filepath.Join(t.TempDir(), "key"), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealed, err := v.SealWebhook(1, []byte("https://hooks.example.test/synthetic"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := v.OpenWebhook(1, sealed); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := v.OpenWebhook(2, sealed); err == nil {
+		t.Fatal("workspace ciphertext moved")
+	}
+	if _, err := v.Open("1", sealed); err == nil {
+		t.Fatal("webhook decoded as account")
+	}
+}
+
 func TestEncryptionBindsCredentialsToAccount(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "credentials.key")
 	v, err := Open(path, true)

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/murongg/SubLane/internal/accounts"
+	"github.com/murongg/SubLane/internal/alerts"
 	"github.com/murongg/SubLane/internal/apikey"
 	"github.com/murongg/SubLane/internal/auth"
 	"github.com/murongg/SubLane/internal/config"
@@ -97,6 +98,11 @@ func run() error {
 		return err
 	}
 	keys := apikey.New(db, cipher)
+	notifications := alerts.New(db, cipher, nil)
+	if err := notifications.Verify(ctx); err != nil {
+		return fmt.Errorf("verify workspace webhook credentials: %w", err)
+	}
+	defer notifications.Close()
 	if err := keys.Verify(ctx); err != nil {
 		return fmt.Errorf("verify API key secrets: %w", err)
 	}
@@ -138,6 +144,7 @@ func run() error {
 	priceCatalog.Start(ctx)
 	defer priceCatalog.Close()
 	registry := &tenantRegistry{ctx: ctx, db: db, vault: cipher, auth: authentication,
+		alerts:  notifications,
 		tenants: tenancy, provider: provider, pricing: priceCatalog, versions: codexVersions, timeZone: timeZone,
 		assets: web.Assets(), dataDir: cfg.DataDir, publicURL: cfg.PublicURL, trustedProxies: cfg.TrustedProxies,
 		version: version, started: time.Now()}
@@ -150,6 +157,7 @@ func run() error {
 		gateway.MaintainHistory(maintenanceCtx, db)
 	}()
 	defer func() { stopMaintenance(); <-maintenanceDone }()
+	notifications.Start(ctx)
 	return serve(ctx, logger, cfg.Addr, server.NewMulti(db, authentication, tenancy, cfg.PublicURL, registry.Handler))
 }
 

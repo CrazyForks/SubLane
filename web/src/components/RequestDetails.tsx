@@ -1,4 +1,9 @@
 import { useTranslation } from 'react-i18next'
+import { useQuery } from '@tanstack/react-query'
+import { Link } from '@tanstack/react-router'
+import { authOptions } from '@/lib/auth'
+import { requestRecovery } from '@/lib/recovery'
+import { Button } from './ui/Button'
 import type { RequestRecord } from '@/lib/requests'
 import { outcomeKeys, formatRequestCost } from '@/lib/requests'
 import { reasonKeys } from '@/lib/runtime'
@@ -21,7 +26,12 @@ export function RequestDetails({
   onRestoreFocus: () => void
 }) {
   const { t, i18n } = useTranslation()
+  const { data: auth } = useQuery(authOptions())
   if (!value) return null
+  const recovery = requestRecovery(
+    value.error_code,
+    auth?.user?.role === 'admin',
+  )
   const numbers = new Intl.NumberFormat(i18n.resolvedLanguage ?? 'en')
   const ms = (n: number | null) =>
     n === null ? '—' : `${numbers.format(n)} ms`
@@ -91,6 +101,24 @@ export function RequestDetails({
             </div>
           ))}
         </dl>
+        {['error', 'rejected', 'incomplete'].includes(value.outcome) && (
+          <section
+            className="space-y-3 border-t border-border pt-4"
+            aria-label={t('recoveryTitle')}
+          >
+            <h3 className="text-sm font-medium">{t('recoveryTitle')}</h3>
+            <p className="text-sm leading-6 text-muted-foreground">
+              {t(recovery.hint)}
+            </p>
+            {recovery.to && recovery.action && (
+              <Button asChild variant="outline">
+                <Link to={recovery.to} onClick={onClose}>
+                  {t(recovery.action)}
+                </Link>
+              </Button>
+            )}
+          </section>
+        )}
         <p className="text-xs leading-5 text-muted-foreground">
           {t('requestFirstTokenHint')}
         </p>

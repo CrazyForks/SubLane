@@ -52,6 +52,10 @@ it.each([
         return Promise.resolve(new Response(JSON.stringify(session)))
       if (url === '/api/workspaces')
         return Promise.resolve(new Response(JSON.stringify(workspaces)))
+      if (url === '/api/connection')
+        return Promise.resolve(
+          new Response(JSON.stringify({ status: 'ready' })),
+        )
       if (url === '/api/me/allocations')
         return Promise.resolve(new Response(JSON.stringify({ schemes: [] })))
       if (url === '/api/me/limits')
@@ -137,6 +141,7 @@ it.each([
         ([url]) =>
           url === '/api/auth/state' ||
           url === '/api/workspaces' ||
+          url === '/api/connection' ||
           url === '/api/me/limits' ||
           url === '/api/me/allocations' ||
           url.startsWith(endpoint + '?'),

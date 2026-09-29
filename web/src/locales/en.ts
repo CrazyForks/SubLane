@@ -6,6 +6,99 @@ export const en = {
   demoExplore: 'Explore demo',
   demoReadOnly:
     'Changes are unavailable in this demo. You can still browse and filter the sample data.',
+  tourStart: 'Start guided setup',
+  tourOpen: 'Guided setup',
+  tourAccessWaiting:
+    'After your administrator grants access, check progress to continue.',
+  tourTitle: 'Guided setup',
+  tourStep: 'Step {{current}} of {{total}}',
+  tourSkip: 'Skip guide',
+  tourPrevious: 'Previous step',
+  tourNext: 'Next step',
+  tourFinish: 'Finish guide',
+  tourCheck: 'Check progress',
+  tourStepDone: 'This step is complete. Continue when you are ready.',
+  tourWaiting:
+    'Complete the highlighted action. The next step unlocks after confirmation.',
+  tourUnavailable:
+    'Progress could not be confirmed. Check again before continuing.',
+  tourOpenStep: 'Go to this step',
+
+  recoveryModel:
+    'Open this key’s client guide and choose a model from its available catalog. Ask your administrator if the required model is missing.',
+  recoveryUpstream:
+    'Check the affected account’s connection, proxy, and cooldown status. Retry after recovery; an existing conversation stays on its original account.',
+  alertsSaving: 'Saving…',
+  recoveryAllocations: 'Review allocations',
+  alertsTitle: 'Workspace alerts',
+  alertsEnabled: 'Notifications enabled',
+  alertsDisabled: 'Notifications off',
+  alertsConfigure: 'Configure alerts',
+  alertsDescription:
+    'Receive webhook notifications when an account needs authorization, a pool has no verified available account, or generation failures increase.',
+  alertsUnavailable: 'Could not load or save alert settings. Try again.',
+  alertsDeliveryFailed:
+    'The webhook could not be delivered. Check the receiver; delivery will retry automatically.',
+  alertsNeverDelivered:
+    'No notification has been delivered yet. The destination is not verified until an event is accepted.',
+  alertsLastDelivered: 'Last delivered: {{date}}',
+  alertsPayload:
+    'Checks run every minute. Only event IDs, workspace/resource IDs, event types, state changes, and timestamps are sent. Unchanged incidents are deduplicated; recovery sends another event.',
+  alertsEnable: 'Enable notifications',
+  alertsURL: 'Webhook URL',
+  alertsURLHint:
+    'Use a public HTTPS endpoint accepting JSON POST requests. The URL is stored encrypted.',
+  alertsKeepURL:
+    'Leave blank to keep the encrypted destination. Enter a new URL to replace it.',
+  alertsClear: 'Remove the saved destination and disable notifications',
+  alertsInvalid:
+    'Enter a public HTTPS URL without credentials or a fragment. Enabling notifications requires a destination.',
+  alertReauthorization: 'Account needs authorization',
+  alertPoolUnavailable: 'Pool has no verified available account',
+  alertRequestFailures: 'Generation failures increased',
+
+  clientConfigureKey: 'Configure {{name}}',
+  clientCatalogUnavailable:
+    'No model catalog is available for this key. Refresh it or ask your administrator to check its pool.',
+  clientCheckRequest: 'Check first request',
+  recoveryTitle: 'What to do next',
+  recoveryWait:
+    'Wait before retrying. Repeated immediate retries will not free capacity or end a cooldown.',
+  recoveryContext:
+    'Reduce the conversation context or start a new conversation in your client.',
+  recoveryQuota:
+    'The subscription quota is exhausted. Check its reset time with your administrator. An existing conversation stays on its original account.',
+  recoveryAdmin:
+    'Open the relevant settings, check this request’s pool and account, then ask the caller to retry after resolving the cause.',
+  recoveryContact:
+    'Copy the request ID above and send it to your workspace administrator. They need to repair the account, pool permissions, or allocation.',
+  recoveryUnknown:
+    'Keep the request ID above. If a retry also fails, share it with your workspace administrator for diagnosis.',
+
+  activationTitle: 'Complete your first request',
+  activationAccount: 'Connect a subscription account',
+  activationAccountHint:
+    'Connect and enable a Codex subscription account in this workspace.',
+  activationVerify: 'Verify the account connection',
+  activationVerifyHint:
+    'Open the account and verify its connection before adding it to a pool.',
+  activationPool: 'Add the account to an enabled pool',
+  activationPoolHint:
+    'Your account is connected. Create or enable a pool and add the verified account.',
+  activationPoolAction: 'Set up an account pool',
+  activationAccess: 'Receive account pool access',
+  activationAccessHint:
+    'Ask your workspace administrator to grant you access to a ready account pool.',
+  activationKey: 'Create your personal API key',
+  activationKeyHint: 'Create or enable a personal key for your account pool.',
+  activationClient: 'Configure a client and send a message',
+  activationClientHint:
+    'Open a key’s client guide, choose an available model, and send a message. This step completes after the gateway records your successful generation.',
+  activationComplete: 'Your first request succeeded',
+  activationCompleteHint:
+    'A successful generation has been recorded for you in this workspace.',
+  activationRequests: 'View my requests',
+
   workspaceChooseTitle: 'Choose a workspace',
   workspaceChooseDescription: 'Select an active workspace to continue.',
   workspaceNoneActive: 'You do not have access to an active workspace.',
@@ -301,6 +394,7 @@ export const en = {
   auditBackupVerify: 'Verified backup',
   systemSettings: 'System settings',
   systemSettingsDescription: 'Applies to every workspace.',
+  workspaceSettingsDescription: 'Applies only to the current workspace.',
   timeZoneTitle: 'Time zone',
   timeZoneDescription:
     'Controls displayed timestamps and daily/monthly resource allowance resets across this instance. Historical operational usage charts retain their UTC buckets.',

@@ -14,6 +14,8 @@ export function canAccess(
     return false
   }
   if (role === 'admin') {
+    // This settings page owns workspace configuration, so platform-owner access is not required.
+    if (path === '/admin/settings/alerts') return true
     if (path === '/admin/settings' || path.startsWith('/admin/settings/'))
       return platformAdmin
     return true

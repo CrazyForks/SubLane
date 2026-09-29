@@ -143,6 +143,20 @@ it('shows a failed connection and allows recovery', async () => {
           }),
         ),
       )
+    if (url === '/api/alerts')
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            enabled: false,
+            configured: false,
+            destination: '',
+            last_delivered_at: 0,
+            next_retry_at: 0,
+            delivery_failed: false,
+            incidents: [],
+          }),
+        ),
+      )
     systemCalls++
     return Promise.resolve(
       systemCalls === 1

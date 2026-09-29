@@ -143,6 +143,10 @@ func recordStatistics(ctx context.Context, q *db.Queries, r db.RecordRequestPara
 	switch r.Outcome {
 	case "success":
 		entry.Completed = 1
+		// Completion survives bounded history cleanup and commits with the request's accounting.
+		if err := q.RecordFirstRequest(ctx, db.RecordFirstRequestParams{UserID: r.UserID, GroupID: r.GroupID, StartedAt: r.StartedAt}); err != nil {
+			return err
+		}
 	case "incomplete":
 		entry.Incomplete = 1
 	case "error":

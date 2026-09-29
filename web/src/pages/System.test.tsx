@@ -4,7 +4,7 @@ import { createMemoryHistory } from '@tanstack/react-router'
 import { expect, it, vi } from 'vitest'
 import { App } from '@/App'
 import { createAppRouter } from '@/router'
-import { authenticated } from '@/test/fixtures'
+import { authenticated, workspaces } from '@/test/fixtures'
 
 function session() {
   const fetch = vi.fn().mockImplementation((url: string) =>
@@ -116,3 +116,90 @@ it('opens the instance time zone page from the system submenu', async () => {
       .getAttribute('aria-current'),
   ).toBe('page')
 })
+
+it.each([1, 2])(
+  'opens workspace alerts from system settings for administrator %s',
+  async (userID) => {
+    const fetch = vi.fn((url: string) =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify(
+            url === '/api/auth/state'
+              ? {
+                  ...authenticated,
+                  user: { ...authenticated.user, id: userID },
+                }
+              : url === '/api/workspaces'
+                ? workspaces
+                : {
+                    enabled: false,
+                    configured: false,
+                    destination: '',
+                    last_delivered_at: 0,
+                    next_retry_at: 0,
+                    delivery_failed: false,
+                    incidents: [],
+                  },
+          ),
+        ),
+      ),
+    )
+    vi.stubGlobal('fetch', fetch)
+    const user = userEvent.setup()
+    const router = open('/preferences')
+    await user.click(
+      await screen.findByRole('button', { name: 'System settings' }),
+    )
+    await user.click(screen.getByRole('link', { name: 'Workspace alerts' }))
+    expect(
+      await screen.findByRole('heading', { name: 'Workspace alerts' }),
+    ).toBeTruthy()
+    expect(router.state.location.pathname).toBe('/admin/settings/alerts')
+    expect(
+      screen.getByText('Applies only to the current workspace.'),
+    ).toBeTruthy()
+    expect(fetch.mock.calls.some(([url]) => url === '/api/alerts')).toBe(true)
+    if (userID !== 1) {
+      expect(
+        screen.queryByRole('link', { name: 'Codex client version' }),
+      ).toBeNull()
+      expect(screen.queryByRole('link', { name: 'Time zone' })).toBeNull()
+      expect(
+        screen.queryByRole('link', { name: 'Backup and restore' }),
+      ).toBeNull()
+    }
+    await user.click(
+      await screen.findByRole('button', { name: 'Configure alerts' }),
+    )
+    expect(screen.getByLabelText('Webhook URL')).toBeTruthy()
+  },
+)
+
+it.each([
+  '/admin/settings/codex',
+  '/admin/settings/timezone',
+  '/admin/settings/backup',
+])(
+  'keeps platform settings protected from workspace administrators at %s',
+  async (path) => {
+    const fetch = vi.fn((url: string) =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify(
+            url === '/api/auth/state'
+              ? { ...authenticated, user: { ...authenticated.user, id: 2 } }
+              : workspaces,
+          ),
+        ),
+      ),
+    )
+    vi.stubGlobal('fetch', fetch)
+    open(path)
+    expect(
+      await screen.findByRole('heading', { name: 'Access denied' }),
+    ).toBeTruthy()
+    expect(
+      fetch.mock.calls.some(([url]) => url.startsWith('/api/settings/')),
+    ).toBe(false)
+  },
+)

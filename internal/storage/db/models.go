@@ -34,6 +34,20 @@ type AccountGroup struct {
 	TenantID         int64
 }
 
+type AlertState struct {
+	TenantID        int64
+	Kind            string
+	Subject         string
+	Active          int64
+	DeliveredActive int64
+	EventID         string
+	ChangedAt       int64
+	Attempts        int64
+	RetryAt         int64
+	DeliveredAt     int64
+	DeliveryFailed  int64
+}
+
 type AllocationEntry struct {
 	RequestID    string
 	SchemeID     int64

@@ -89,7 +89,7 @@ func ValidTarget(action, resource, id string) bool {
 		return accountID.MatchString(id)
 	}
 	if resource == "settings" {
-		return id == "codex" || id == "timezone"
+		return id == "codex" || id == "timezone" || id == "alerts"
 	}
 	return numericID.MatchString(id)
 }

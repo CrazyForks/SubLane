@@ -13,6 +13,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/murongg/SubLane/internal/accounts"
+	"github.com/murongg/SubLane/internal/alerts"
 	"github.com/murongg/SubLane/internal/apikey"
 	"github.com/murongg/SubLane/internal/audit"
 	"github.com/murongg/SubLane/internal/auth"
@@ -33,6 +34,7 @@ type Options struct {
 	StartedAt         time.Time
 	Ping              func(context.Context) error
 	Audit             *audit.Service
+	Alerts            *alerts.Service
 	Auth              *auth.Service
 	Keys              *apikey.Service
 	Accounts          *accounts.Service
@@ -112,6 +114,14 @@ func New(o Options) http.Handler {
 			}
 		}
 		summary["has_usable_key"] = usableKey
+		if o.Gateway != nil {
+			progress, err := o.Gateway.SetupProgress(r.Context(), sessionUser(r).ID, true, usableKey)
+			if err != nil {
+				writeJSON(w, 503, map[string]string{"error": "unavailable"})
+				return
+			}
+			summary["setup"] = progress
+		}
 		writeJSON(w, 200, map[string]any{
 			"name": "SubLane", "version": o.Version, "status": "ok", "uptime_seconds": max(0, int64(time.Since(o.StartedAt).Seconds())),
 			"storage": map[string]string{"engine": "sqlite", "status": "ready"},
@@ -145,7 +155,21 @@ func New(o Options) http.Handler {
 					writeJSON(w, 503, map[string]string{"error": "unavailable"})
 					return
 				}
-				writeJSON(w, 200, map[string]string{"status": status})
+				result := map[string]any{"status": status}
+				if o.Gateway != nil && o.Keys != nil {
+					usable, err := o.Keys.HasUsableKey(r.Context(), sessionUser(r).ID)
+					if err != nil {
+						writeJSON(w, 503, map[string]string{"error": "unavailable"})
+						return
+					}
+					progress, err := o.Gateway.SetupProgress(r.Context(), sessionUser(r).ID, sessionUser(r).Role == "admin", usable)
+					if err != nil {
+						writeJSON(w, 503, map[string]string{"error": "unavailable"})
+						return
+					}
+					result["setup"] = progress
+				}
+				writeJSON(w, 200, result)
 			})
 		})
 		api.Route("/keys", func(personal chi.Router) {
@@ -178,6 +202,7 @@ func New(o Options) http.Handler {
 			members.Patch("/{id}/limits", memberManagement.updateLimits)
 		})
 		management.Get("/usage", memberManagement.usage)
+		management.Route("/alerts", (&alertHTTP{service: o.Alerts, tenantID: tenantID}).register)
 		management.Get("/audit", (&auditHTTP{service: o.Audit}).list)
 		management.Route("/settings/backup", func(settings chi.Router) {
 			settings.Use(requirePlatformAdmin(tenantID))

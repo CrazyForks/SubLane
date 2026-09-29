@@ -31,6 +31,57 @@ const response = (value: unknown) =>
         : value,
     ),
   )
+
+it('configures a specific personal key from its permitted model catalog', async () => {
+  const calls: string[] = []
+  vi.stubGlobal(
+    'fetch',
+    vi.fn((url: string) => {
+      calls.push(url)
+      return Promise.resolve(
+        response(
+          url === '/api/auth/state'
+            ? memberAuthenticated
+            : url === '/api/connection'
+              ? {
+                  status: 'ready',
+                  setup: { stage: 'client', has_successful_request: false },
+                }
+              : url === '/api/keys/1/models'
+                ? {
+                    models: [
+                      {
+                        id: 'synthetic-allowed',
+                        object: 'model',
+                        owned_by: 'codex',
+                      },
+                    ],
+                    known_accounts: 1,
+                    unknown_accounts: 0,
+                    stale_accounts: 0,
+                    refreshing: false,
+                    refresh_failed: false,
+                    server_time: 1900000000,
+                  }
+                : { keys: [metadata], next_cursor: 0 },
+        ),
+      )
+    }),
+  )
+  const user = userEvent.setup()
+  open()
+  await user.click(
+    await screen.findByRole('button', { name: 'Configure Synthetic laptop' }),
+  )
+  const picker = await screen.findByRole('combobox', { name: 'Model ID' })
+  await user.click(picker)
+  await user.click(
+    await screen.findByRole('option', { name: 'synthetic-allowed' }),
+  )
+  expect(screen.getByText(/model = "synthetic-allowed"/)).toBeTruthy()
+  expect(calls).toContain('/api/keys/1/models')
+  expect(calls.some((url) => url.includes('/reveal'))).toBe(false)
+})
 function open() {
   render(
     <App

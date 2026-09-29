@@ -19,6 +19,10 @@ func openVault(ctx context.Context, connection *sql.DB, directory string) (*vaul
 	if err != nil {
 		return nil, err
 	}
-	// A key-only instance still depends on this file; never replace it after data has been encrypted.
-	return vault.Open(filepath.Join(directory, "credentials.key"), accounts == 0 && keys == 0)
+	webhooks, err := q.CountWebhookSecrets(ctx)
+	if err != nil {
+		return nil, err
+	}
+	// Key-only and webhook-only instances also depend on this file.
+	return vault.Open(filepath.Join(directory, "credentials.key"), accounts == 0 && keys == 0 && webhooks == 0)
 }

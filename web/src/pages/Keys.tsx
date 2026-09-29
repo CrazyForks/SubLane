@@ -39,8 +39,12 @@ function KeyManager({ userID }: { userID: number }) {
   const now = query.data
     ? query.data.server_time + Math.max(0, clock - query.dataUpdatedAt) / 1000
     : clock / 1000
-  const invalidate = () => {
-    return client.invalidateQueries({ queryKey: ['keys', userID] })
+  const invalidate = async () => {
+    await Promise.all([
+      client.invalidateQueries({ queryKey: ['keys', userID] }),
+      client.invalidateQueries({ queryKey: ['connection', userID] }),
+      client.invalidateQueries({ queryKey: ['system'] }),
+    ])
   }
   const dates = new Intl.DateTimeFormat(i18n.resolvedLanguage ?? 'en', {
     timeZone,
@@ -65,7 +69,11 @@ function KeyManager({ userID }: { userID: number }) {
           />
         </div>
       </div>
-      <p className="text-sm leading-6 text-muted-foreground">
+      <p
+        data-tour="access"
+        tabIndex={-1}
+        className="text-sm leading-6 text-muted-foreground"
+      >
         {t('gatewayKeysNotice')}
       </p>
       {query.isPending ? (
@@ -187,6 +195,11 @@ function KeyManager({ userID }: { userID: number }) {
                   </td>
                   <td className="px-5 py-4 text-right">
                     <div className="flex justify-end gap-2">
+                      <ClientGuide
+                        value={key}
+                        userID={userID}
+                        disabled={keyState(key, now) !== 'active'}
+                      />
                       <CCSwitchImport
                         value={key}
                         userID={userID}

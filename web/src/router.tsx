@@ -38,6 +38,14 @@ const routes = root.addChildren([
   settings.addChildren([
     createRoute({
       getParentRoute: () => settings,
+      path: 'alerts',
+      component: lazyRouteComponent(
+        () => import('@/pages/System'),
+        'AlertSettings',
+      ),
+    }),
+    createRoute({
+      getParentRoute: () => settings,
       path: 'backup',
       component: lazyRouteComponent(() => import('@/pages/Backup'), 'Backup'),
     }),
