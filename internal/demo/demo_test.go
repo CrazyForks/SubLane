@@ -45,6 +45,13 @@ func TestDemoLoginReadOnlyAndCleanup(t *testing.T) {
 		t.Fatalf("login: %d %s", login.Code, login.Body.String())
 	}
 	cookie := login.Result().Cookies()[0]
+	alertSettings := call("GET", "/api/alerts", "", cookie)
+	if alertSettings.Code != 200 || !strings.Contains(alertSettings.Body.String(), `"enabled":false`) || !strings.Contains(alertSettings.Body.String(), `"configured":false`) {
+		t.Fatalf("read-only alert settings: %d %s", alertSettings.Code, alertSettings.Body.String())
+	}
+	if got := call("PUT", "/api/alerts", `{"enabled":true,"url":"https://example.test/webhook"}`, cookie); got.Code != 403 || !strings.Contains(got.Body.String(), "demo_read_only") {
+		t.Fatalf("alert mutation: %d %s", got.Code, got.Body.String())
+	}
 	var history gateway.RequestPage
 	if err := json.Unmarshal(call("GET", "/api/requests", "", cookie).Body.Bytes(), &history); err != nil || len(history.Requests) == 0 {
 		t.Fatalf("history: %+v %v", history, err)

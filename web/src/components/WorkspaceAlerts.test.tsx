@@ -57,3 +57,41 @@ it('saves optional workspace notifications and clears the entered secret', async
     },
   ])
 })
+
+it('explains that demo alerts are read-only without sending a mutation', async () => {
+  const client = createQueryClient()
+  client.setQueryData(authKey, {
+    ...authenticated,
+    demo: { username: 'demo', password: 'synthetic-demo-password' },
+  })
+  const fetcher = vi.fn(() =>
+    Promise.resolve(
+      new Response(
+        JSON.stringify({
+          enabled: false,
+          configured: false,
+          destination: '',
+          last_delivered_at: 0,
+          next_retry_at: 0,
+          delivery_failed: false,
+          incidents: [],
+        }),
+      ),
+    ),
+  )
+  vi.stubGlobal('fetch', fetcher)
+  render(
+    <QueryClientProvider client={client}>
+      <WorkspaceAlerts userID={1} />
+    </QueryClientProvider>,
+  )
+  const user = userEvent.setup()
+  await user.click(
+    await screen.findByRole('button', { name: 'Configure alerts' }),
+  )
+  await user.click(screen.getByRole('button', { name: 'Save changes' }))
+  expect((await screen.findByRole('alert')).textContent).toBe(
+    'Changes are unavailable in this demo. You can still browse and filter the sample data.',
+  )
+  expect(fetcher).toHaveBeenCalledTimes(1)
+})

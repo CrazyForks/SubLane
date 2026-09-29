@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { queryOptions } from '@tanstack/react-query'
-import { request } from './request'
+import { ApiError, request } from './request'
 
 const alertSchema = z.object({
   enabled: z.boolean(),
@@ -37,6 +37,13 @@ export const saveAlerts = (input: AlertInput, signal: AbortSignal) =>
     body: JSON.stringify(input),
     signal,
   })
+export function alertError(error: unknown) {
+  if (error instanceof ApiError) {
+    if (error.code === 'demo_read_only') return 'demoReadOnly'
+    if (error.code === 'invalid_alert_settings') return 'alertsInvalid'
+  }
+  return 'alertsUnavailable'
+}
 export const alertNames = {
   account_reauthorization: 'alertReauthorization',
   pool_unavailable: 'alertPoolUnavailable',

@@ -5,12 +5,12 @@ import {
   alertOptions,
   saveAlerts,
   alertNames,
+  alertError,
   type AlertState,
   type AlertInput,
 } from '@/lib/alerts'
 import { useAdminMutation } from '@/hooks/use-admin-mutation'
 import { useTimeZone, formatInstanceDate } from '@/lib/timezone'
-import { ApiError } from '@/lib/request'
 import { Button } from './ui/Button'
 import { Input } from './ui/Input'
 import { Status } from './Status'
@@ -209,12 +209,7 @@ function AlertForm({
       )}
       {mutation.isError && (
         <p role="alert" className="text-sm text-error">
-          {t(
-            mutation.error instanceof ApiError &&
-              mutation.error.code === 'invalid_alert_settings'
-              ? 'alertsInvalid'
-              : 'alertsUnavailable',
-          )}
+          {t(alertError(mutation.error))}
         </p>
       )}
       <Button
