@@ -70,7 +70,7 @@ make setup
 make dev
 ```
 
-Open http://127.0.0.1:5173. Run `make check` to test and build the project.
+Open http://127.0.0.1:5173. Air rebuilds and restarts the backend when Go code changes; Vite handles frontend HMR. Air runs at a pinned version without a global installation. Run `make check` to test and build the project.
 
 ## Documentation
 

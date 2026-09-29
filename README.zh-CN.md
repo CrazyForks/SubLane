@@ -70,7 +70,7 @@ make setup
 make dev
 ```
 
-打开 http://127.0.0.1:5173，运行 `make check` 执行检查、测试和构建。
+打开 http://127.0.0.1:5173。修改 Go 代码后，Air 自动重新编译并重启后端；前端由 Vite 提供 HMR。Air 使用固定版本，无需全局安装。运行 `make check` 执行检查、测试和构建。
 
 ## 文档
 

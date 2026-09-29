@@ -1,0 +1,20 @@
+root = "."
+tmp_dir = "bin/air"
+env_files = []
+
+[build]
+cmd = "go build -o ./bin/air/sublane-dev ./cmd/sublane"
+entrypoint = ["./bin/air/sublane-dev"]
+include_dir = ["cmd", "internal", "web"]
+include_ext = ["go", "sql"]
+include_file = ["go.mod", "go.sum"]
+exclude_dir = ["bin", "web/node_modules", "web/src", "web/public", "web/dist"]
+exclude_regex = ["_test\\.go$"]
+delay = 300
+stop_on_error = true
+send_interrupt = true
+# Match the server's graceful shutdown deadline before forcing a restart.
+kill_delay = "10s"
+
+[misc]
+clean_on_exit = true

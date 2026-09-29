@@ -6,6 +6,7 @@ VERSION ?= 0.1.0-dev
 WEB_PORT ?= 5173
 GIT_CLIFF ?= git-cliff
 SQLC = $(GO) run github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1
+AIR ?= $(GO) run github.com/air-verse/air@v1.67.4
 
 setup:
 	$(GO) mod download
@@ -15,7 +16,7 @@ dev:
 	node scripts/dev.mjs --port=$(WEB_PORT)
 
 dev-api:
-	$(GO) run ./cmd/sublane
+	CGO_ENABLED=0 $(AIR) -c .air.toml
 
 dev-web:
 	$(PNPM) --dir web dev
@@ -37,6 +38,7 @@ test:
 
 lint:
 	@for script in scripts/*.sh; do bash -n "$$script" || exit 1; done
+	node --check scripts/dev.mjs
 	node --check scripts/release.mjs
 	node --check scripts/publish.mjs
 	node --check scripts/changelog.mjs
