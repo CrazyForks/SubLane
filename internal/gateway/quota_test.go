@@ -128,3 +128,106 @@ func TestQuotaRejectionIsRecordedWithoutPenalizingAccount(t *testing.T) {
 		}
 	}
 }
+
+func TestSubscriptionQuotaSelectionPreservesAffinityAndModelScope(t *testing.T) {
+	for _, provider := range []string{"claude", "antigravity"} {
+		t.Run(provider, func(t *testing.T) {
+			ctx := context.Background()
+			s, ids := providerGateway(t, transportFunc(func(*http.Request) (*http.Response, error) { return syntheticStream(), nil }))
+			id := ids[provider]
+			catalog, err := s.accounts.Catalog(ctx, id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := s.accounts.SaveCatalog(ctx, id, catalog.Revision, []string{"synthetic-model", "synthetic-other"}, s.now().Unix(), upstream.CatalogSource(provider)); err != nil {
+				t.Fatal(err)
+			}
+			bound, _, err := s.selectAccount(ctx, 1, 1, "synthetic-conversation", provider, "synthetic-model", Responses)
+			if err != nil || bound != id {
+				t.Fatal("initial binding", bound, err)
+			}
+			snapshot := upstream.Usage{UpdatedAt: s.now().Unix(), Limits: []upstream.UsageLimit{{Name: "", Windows: []upstream.UsageWindow{{Kind: "primary", UsedPercent: quotaFloat(100)}}}}}
+			if provider == "antigravity" {
+				snapshot.Limits[0].Name = "synthetic-model"
+				snapshot.Limits[0].Windows[0].Kind = "model"
+			}
+			saveProviderQuota(t, s, id, snapshot)
+			restarted := New(ctx, s.db, s.accounts, s.provider)
+			defer restarted.Close()
+			if chosen, _, err := restarted.selectAccount(ctx, 1, 1, "synthetic-conversation", provider, "synthetic-model", Responses); !errors.Is(err, ErrQuotaExhausted) || chosen != id {
+				t.Fatal("exhausted binding moved or was admitted", chosen, err)
+			}
+			if _, _, err := restarted.selectAccount(ctx, 1, 1, "", provider, "synthetic-model", Responses); !errors.Is(err, ErrQuotaExhausted) {
+				t.Fatal("exhausted model selected", err)
+			}
+			_, _, err = restarted.selectAccount(ctx, 1, 1, "", provider, "synthetic-other", Responses)
+			if provider == "antigravity" && err != nil || provider == "claude" && !errors.Is(err, ErrQuotaExhausted) {
+				t.Fatal("wrong quota scope", err)
+			}
+			states, err := restarted.Runtime(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, state := range states {
+				if state.ID == id && (state.Failures != 0 || provider == "antigravity" && state.State == "quota_exhausted" || provider == "claude" && state.State != "quota_exhausted") {
+					t.Fatal("model quota became an account-wide failure", state)
+				}
+			}
+			if _, err := s.accounts.SetEnabled(ctx, id, false); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := s.accounts.SetEnabled(ctx, id, true); err != nil {
+				t.Fatal(err)
+			}
+			if _, _, err := restarted.selectAccount(ctx, 1, 1, "synthetic-conversation", provider, "synthetic-model", Responses); err != nil {
+				t.Fatal("obsolete quota survived lifecycle", err)
+			}
+		})
+	}
+}
+
+func TestSubscriptionQuotaNeverInventsExhaustion(t *testing.T) {
+	ctx := context.Background()
+	s, ids := providerGateway(t, transportFunc(func(*http.Request) (*http.Response, error) { return syntheticStream(), nil }))
+	now := s.now().Unix()
+	for _, provider := range []string{"claude", "antigravity"} {
+		for _, test := range []struct {
+			name      string
+			updated   int64
+			used      *float64
+			reset     *int64
+			limitName string
+		}{
+			{"stale", now - 121, quotaFloat(100), nil, ""},
+			{"future", now + 10, quotaFloat(100), nil, ""},
+			{"already reset", now, quotaFloat(100), quotaInt(now - 1), ""},
+			{"unknown percentage", now, nil, nil, ""},
+			{"remaining", now, quotaFloat(99), nil, ""},
+			{"unrelated named limit", now, quotaFloat(100), nil, "synthetic-unrelated"},
+		} {
+			t.Run(provider+"/"+test.name, func(t *testing.T) {
+				name := test.limitName
+				if provider == "antigravity" && name == "" {
+					name = "synthetic-model"
+				}
+				saveProviderQuota(t, s, ids[provider], upstream.Usage{UpdatedAt: test.updated, Limits: []upstream.UsageLimit{{Name: name, Windows: []upstream.UsageWindow{{UsedPercent: test.used, ResetAt: test.reset}}}}})
+				if _, _, err := s.selectAccount(ctx, 1, 1, "", provider, "synthetic-model", Responses); err != nil {
+					t.Fatal("unusable or unrelated observation blocked selection", err)
+				}
+			})
+		}
+	}
+}
+
+func saveProviderQuota(t *testing.T, s *Service, id string, usage upstream.Usage) {
+	t.Helper()
+	raw, err := json.Marshal(usage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(`INSERT INTO account_usage(account_id,snapshot,updated_at,revision) SELECT id,?,?,models_revision FROM accounts WHERE id=? ON CONFLICT(account_id) DO UPDATE SET snapshot=excluded.snapshot,updated_at=excluded.updated_at,revision=excluded.revision`, raw, usage.UpdatedAt, id); err != nil {
+		t.Fatal(err)
+	}
+}
+func quotaFloat(value float64) *float64 { return &value }
+func quotaInt(value int64) *int64       { return &value }

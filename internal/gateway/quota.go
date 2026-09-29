@@ -69,8 +69,8 @@ func savedUsage(row db.GetAccountUsageRow) *upstream.Usage {
 	return &value
 }
 
-func (s *Service) accountQuota(ctx context.Context, q *db.Queries, account accounts.Account) (quotaDecision, error) {
-	if account.Provider != "codex" {
+func (s *Service) accountQuota(ctx context.Context, q *db.Queries, account accounts.Account, model string) (quotaDecision, error) {
+	if !quotaRoutingSupported(account.Provider) {
 		return quotaDecision{State: "unsupported"}, nil
 	}
 	row, err := q.GetAccountUsage(ctx, account.ID)
@@ -81,12 +81,26 @@ func (s *Service) accountQuota(ctx context.Context, q *db.Queries, account accou
 		return quotaDecision{}, err
 	}
 	if value := savedUsage(row); value != nil {
+		if account.Provider == "antigravity" {
+			// Only an exact native model match can deny a request. Never infer an
+			// account-wide limit or a mapping from another model's name.
+			id := upstream.CatalogModelID(model)
+			for _, limit := range value.Limits {
+				if id != "" && limit.Name == id {
+					limit.Name = ""
+					selected := *value
+					selected.Limits = []upstream.UsageLimit{limit}
+					return quotaStatus(selected, s.now()), nil
+				}
+			}
+			return quotaDecision{State: "unknown"}, nil
+		}
 		return quotaStatus(*value, s.now()), nil
 	}
 	return quotaDecision{State: "unknown"}, nil
 }
-func (s *Service) quotaAdmission(ctx context.Context, q *db.Queries, account accounts.Account) error {
-	decision, err := s.accountQuota(ctx, q, account)
+func (s *Service) quotaAdmission(ctx context.Context, q *db.Queries, account accounts.Account, model string) error {
+	decision, err := s.accountQuota(ctx, q, account, model)
 	if err != nil {
 		return err
 	}
@@ -99,7 +113,7 @@ func (s *Service) quotaAdmission(ctx context.Context, q *db.Queries, account acc
 // Traffic warms the existing shared cache without awaiting provider IO. Reading quota
 // here (before selection opens its SQLite transaction) avoids a cache/DB lock inversion.
 func (s *Service) warmUsage(ctx context.Context, userID, groupID int64, provider string) error {
-	if provider != "" && provider != "codex" {
+	if provider != "" && !quotaRoutingSupported(provider) {
 		return nil
 	}
 	if _, err := poolAccounts(ctx, s.queries, userID, groupID); err != nil {
@@ -110,11 +124,15 @@ func (s *Service) warmUsage(ctx context.Context, userID, groupID int64, provider
 		return err
 	}
 	for _, row := range rows {
-		if row.Provider == "codex" {
+		if quotaRoutingSupported(row.Provider) && (provider == "" || row.Provider == provider) {
 			if _, err := s.usageSnapshot(ctx, row.ID, false, false); err != nil && ctx.Err() != nil {
 				return ctx.Err()
 			}
 		}
 	}
 	return nil
+}
+
+func quotaRoutingSupported(provider string) bool {
+	return provider == "codex" || provider == "claude" || provider == "antigravity"
 }

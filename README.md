@@ -28,7 +28,7 @@ SubLane brings AI subscriptions into one gateway with isolated workspaces for di
 - **Subscription accounts:** Connect Codex, Claude, Antigravity and Grok Build through browser OAuth or credential JSON import, with encrypted credentials, connection checks, model discovery and quota snapshots. Grok uses device-code authorization; quota snapshots cover Codex, Claude usage windows, Antigravity per-model allowance and Grok subscription periods.
 - **Client APIs:** OpenAI Responses, Chat Completions and Responses compaction, plus [Claude Messages and Gemini generation formats](https://sublane.dev/docs/protocols). Requests use HTTP/SSE, with WebSocket support for Responses. Client formats are independent of the selected subscription provider.
 - **Workspaces and members:** Isolated accounts, pools, keys, usage and audit records; workspace roles, invitation registration and direct member access grants.
-- **Account pools:** Model allowlists, model-aware account selection, conversation affinity, concurrency controls, cooldown recovery and Codex quota-aware routing.
+- **Account pools:** Model allowlists, model-aware account selection, conversation affinity, concurrency controls, cooldown recovery and Codex/Claude quota-aware routing and model-specific Antigravity quota admission.
 - **Network proxies:** Fixed outbound proxy per account, bulk proxy import and manual exit checks.
 - **Personal API keys:** Pool or allowance binding, expiry, pause and revocation controls, owner-only key copying and CC Switch import.
 - **Usage controls:** Per-member request rate and concurrency limits, plus optional allowances by tokens, configured internal USD amount or estimated Codex quota share.

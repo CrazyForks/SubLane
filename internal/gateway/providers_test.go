@@ -106,6 +106,12 @@ func providerFixture(t *testing.T, transport http.RoundTripper, known bool, vers
 	}
 	configureTestPool(t, connection)
 	client := upstream.NewWithTransport(transportFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path == "/api/oauth/usage" {
+			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"five_hour":null,"seven_day":null}`))}, nil
+		}
+		if r.URL.Host == "cloudcode-pa.googleapis.com" && r.URL.Path == "/v1internal:fetchAvailableModels" {
+			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"models":{}}`))}, nil
+		}
 		if r.URL.Path == "/backend-api/wham/usage" {
 			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"rate_limit":{}}`))}, nil
 		}
@@ -176,20 +182,19 @@ func TestModelCatalogKeepsHealthyProvidersWithNativeIDs(t *testing.T) {
 }
 
 func TestFailedSubscriptionQuotaDoesNotVerifyOrPublishSnapshot(t *testing.T) {
-	gateway, ids := providerGateway(t, transportFunc(func(*http.Request) (*http.Response, error) {
-		return &http.Response{StatusCode: 503, Body: io.NopCloser(strings.NewReader(`{"error":"synthetic-failure"}`))}, nil
-	}))
 	ctx := context.Background()
 	for _, kind := range []string{"claude", "antigravity"} {
-		// Import-equivalent state: no successful provider request has verified this account.
-		if _, err := gateway.db.Exec("UPDATE accounts SET status='unverified' WHERE id=?", ids[kind]); err != nil {
+		f := newProviderQuotaFixture(t, kind)
+		f.fail.Store(true)
+		// A failed read must retain the import-equivalent, unverified state.
+		if _, err := f.connection.Exec("UPDATE accounts SET status='unverified' WHERE id=?", f.id); err != nil {
 			t.Fatal(err)
 		}
-		snapshot, err := gateway.Usage(ctx, ids[kind])
+		snapshot, err := f.service.Usage(ctx, f.id)
 		if err == nil || snapshot.UpdatedAt != 0 {
 			t.Fatal("failed quota read published a successful observation", kind, err)
 		}
-		row, err := gateway.accounts.Get(ctx, ids[kind])
+		row, err := f.accounts.Get(ctx, f.id)
 		if err != nil || row.Status != "unverified" {
 			t.Fatal("failed quota read verified account", err)
 		}

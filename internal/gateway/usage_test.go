@@ -135,6 +135,41 @@ func TestSubscriptionUsageCachePersistsAndRetainsFailedRefresh(t *testing.T) {
 		})
 	}
 }
+
+func TestSubscriptionQuotaWarmupSharesBoundedWorkers(t *testing.T) {
+	for _, provider := range []string{"claude", "antigravity"} {
+		t.Run(provider, func(t *testing.T) {
+			f := newProviderQuotaFixture(t, provider)
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			for _, id := range []string{"synthetic-second", "synthetic-third"} {
+				if _, err := f.accounts.Authorize(ctx, id, accounts.Credential{Provider: provider, AccountID: id, AccessToken: "synthetic-access", RefreshToken: "synthetic-refresh", ExpiresAt: time.Now().Add(time.Hour).Unix(), Metadata: map[string]json.RawMessage{"project_id": json.RawMessage(`"synthetic-project"`)}}, ""); err != nil {
+					t.Fatal(err)
+				}
+			}
+			configureTestPool(t, f.connection)
+			f.block = make(chan struct{})
+			f.started = make(chan struct{}, 3)
+			defer close(f.block)
+			if err := f.service.warmUsage(ctx, 1, 1, provider); err != nil {
+				t.Fatal(err)
+			}
+			for range 2 {
+				select {
+				case <-f.started:
+				case <-ctx.Done():
+					t.Fatal("subscription traffic did not warm quota asynchronously")
+				}
+			}
+			if err := f.service.warmUsage(ctx, 1, 1, provider); err != nil {
+				t.Fatal(err)
+			}
+			if f.calls.Load() != 2 || len(f.service.usage.slots) != 2 || len(f.service.slots) != 2 {
+				t.Fatal("subscription reads bypassed shared bounds or single-flight", f.calls.Load())
+			}
+		})
+	}
+}
 func waitQuota(t *testing.T, f *quotaFixture) UsageSnapshot {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)

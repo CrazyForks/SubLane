@@ -128,7 +128,7 @@ func (s *Service) selectAllocationAccount(ctx context.Context, userID, groupID i
 			if err := s.accountAdmission(*bound); err != nil {
 				return id, digest, err
 			}
-			if err := s.quotaAdmission(ctx, q, *bound); err != nil {
+			if err := s.quotaAdmission(ctx, q, *bound, model); err != nil {
 				return id, digest, err
 			}
 			if scheme != 0 {
@@ -187,7 +187,7 @@ func (s *Service) selectAllocationAccount(ctx context.Context, userID, groupID i
 			}
 			continue
 		}
-		if err := s.quotaAdmission(ctx, q, account); err != nil {
+		if err := s.quotaAdmission(ctx, q, account, model); err != nil {
 			var quota *QuotaError
 			if !errors.As(err, &quota) {
 				return "", digest, err

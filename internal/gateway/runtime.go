@@ -85,7 +85,7 @@ func (s *Service) Runtime(ctx context.Context) ([]Runtime, error) {
 		if err != nil {
 			return nil, err
 		}
-		quota, err := s.accountQuota(ctx, s.queries, account)
+		quota, err := s.accountQuota(ctx, s.queries, account, "")
 		if err != nil {
 			return nil, err
 		}

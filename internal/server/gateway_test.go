@@ -95,6 +95,12 @@ func newForwardingFixture(t *testing.T, provider string, handler http.HandlerFun
 		bodyLimit = maxRequestBody[0]
 	}
 	client := upstream.NewWithOptions(upstream.Options{MaxRequestBody: bodyLimit, Transport: gatewayTransport(func(r *http.Request) (*http.Response, error) {
+		if !quota && r.URL.Path == "/api/oauth/usage" {
+			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"five_hour":null,"seven_day":null}`))}, nil
+		}
+		if !quota && r.URL.Host == "cloudcode-pa.googleapis.com" && r.URL.Path == "/v1internal:fetchAvailableModels" {
+			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"models":{}}`))}, nil
+		}
 		if !quota && r.URL.Path == "/backend-api/wham/usage" {
 			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"rate_limit":{}}`))}, nil
 		}
