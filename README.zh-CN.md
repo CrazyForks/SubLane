@@ -18,7 +18,7 @@
 </p>
 
 <p align="center">
-  <a href="README.md">English</a> · <a href="https://github.com/murongg/SubLane">项目仓库</a> · <a href="brand/README.zh-CN.md">品牌物料</a>
+  <a href="README.md">English</a> · <a href="https://demo.sublane.dev/">在线演示</a> · <a href="https://github.com/murongg/SubLane">项目仓库</a> · <a href="brand/README.zh-CN.md">品牌物料</a>
 </p>
 
 SubLane 将 AI 订阅账号整合为统一网关，并用独立工作空间隔离不同团队。采用 Go + SQLite，内置 Web 管理界面，单进程运行。
@@ -34,6 +34,10 @@ SubLane 将 AI 订阅账号整合为统一网关，并用独立工作空间隔�
 - **用量控制：** 设置成员请求频率与并发上限，并可选按 Token、内部配置的美元金额或预估 Codex 额度份额分配用量。
 - **运维与观测：** 提供个人和工作空间用量图表、活动热力图、请求诊断、管理审计日志、备份、校验与恢复，以及 Codex 客户端版本设置。
 - **管理界面：** 内置中英文 Web 界面，支持明暗主题。
+
+## 在线演示
+
+打开[在线演示](https://demo.sublane.dev/)，在登录页选择进入演示。可浏览示例账号、账号池和用量；演示为只读模式，不执行真实 API 调用。
 
 ## 软件截图
 

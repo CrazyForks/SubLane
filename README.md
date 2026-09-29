@@ -18,7 +18,7 @@
 </p>
 
 <p align="center">
-  <a href="README.zh-CN.md">简体中文</a> · <a href="https://github.com/murongg/SubLane">Repository</a> · <a href="brand/README.md">Brand materials</a>
+  <a href="README.zh-CN.md">简体中文</a> · <a href="https://demo.sublane.dev/">Live demo</a> · <a href="https://github.com/murongg/SubLane">Repository</a> · <a href="brand/README.md">Brand materials</a>
 </p>
 
 SubLane brings AI subscriptions into one gateway with isolated workspaces for different teams. It runs as a single Go service with SQLite and a built-in web dashboard.
@@ -34,6 +34,10 @@ SubLane brings AI subscriptions into one gateway with isolated workspaces for di
 - **Usage controls:** Per-member request rate and concurrency limits, plus optional allowances by tokens, configured internal USD amount or estimated Codex quota share.
 - **Operations:** Personal and workspace usage charts, activity heatmaps, request diagnostics, management audit logs, backup creation, verification and restore, and Codex client version settings.
 - **Dashboard:** Embedded web interface in English and Simplified Chinese, with light and dark themes.
+
+## Live demo
+
+Open the [online demo](https://demo.sublane.dev/) and choose **Explore demo** on the login page. Browse sample accounts, pools and usage in read-only mode; live API calls are disabled.
 
 ## Screenshots
 
