@@ -54,6 +54,7 @@ type Service struct {
 	tenantID  int64
 	now       func() time.Time
 	codexOnly bool
+	refreshes map[string]refreshState
 	// Refresh and administrator mutations share one owner; no model stream holds this lock.
 	mu sync.Mutex
 }
@@ -131,6 +132,7 @@ func (s *Service) save(ctx context.Context, name string, credential Credential, 
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	credential.Rejected = false
 	now := s.now().Unix()
 	if replaceID != "" {
 		row, err := s.get(ctx, replaceID)
@@ -162,6 +164,7 @@ func (s *Service) save(ctx context.Context, name string, credential Credential, 
 		if err := tx.Commit(); err != nil {
 			return Account{}, err
 		}
+		delete(s.refreshes, replaceID)
 		row.Email, row.Plan, row.Status, row.ExpiresAt, row.UpdatedAt = credential.Email, credential.Plan, status, credential.ExpiresAt, now
 		return metadata(row), nil
 	}
@@ -272,92 +275,11 @@ func (s *Service) Delete(ctx context.Context, id string) error {
 	if err := audit.Record(ctx, q, "account.delete", "account", id); err != nil {
 		return err
 	}
-	return tx.Commit()
-}
-
-func (s *Service) Prepare(ctx context.Context, id string, refresh func(context.Context, Credential) (Credential, error)) (Credential, error) {
-	return s.prepare(ctx, id, "", refresh)
-}
-
-func (s *Service) RefreshAfterRejection(ctx context.Context, id, rejectedToken string, refresh func(context.Context, Credential) (Credential, error)) (Credential, error) {
-	if rejectedToken == "" {
-		return Credential{}, ErrInput
+	if err := tx.Commit(); err != nil {
+		return err
 	}
-	return s.prepare(ctx, id, rejectedToken, refresh)
-}
-
-func (s *Service) prepare(ctx context.Context, id, rejectedToken string, refresh func(context.Context, Credential) (Credential, error)) (Credential, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	row, err := s.get(ctx, id)
-	if err != nil {
-		return Credential{}, err
-	}
-	if !s.ProviderEnabled(row.Provider) {
-		return Credential{}, ErrProviderDisabled
-	}
-	if !row.Enabled {
-		return Credential{}, ErrDisabled
-	}
-	if row.Status == "reauth_required" {
-		return Credential{}, ErrReauthorize
-	}
-	credential, err := s.decrypt(row)
-	if err != nil {
-		return Credential{}, err
-	}
-	if row.ProxyID != nil {
-		credential.ProxyURL, err = s.proxyURL(ctx, *row.ProxyID)
-		if err != nil {
-			return Credential{}, err
-		}
-	}
-	// Another request may already have rotated the rejected token while this one was waiting.
-	minimumValidity := 2 * time.Minute
-	// Antigravity may refresh internally within five minutes of expiry. Reserve the full ten-minute request budget too.
-	if credential.Kind() == "antigravity" {
-		minimumValidity = 16 * time.Minute
-	}
-	needsProject := false
-	if credential.Kind() == "antigravity" {
-		var project string
-		_ = json.Unmarshal(credential.Metadata["project_id"], &project)
-		needsProject = project == ""
-	}
-	if !needsProject && credential.ExpiresAt > s.now().Add(minimumValidity).Unix() && (rejectedToken == "" || credential.AccessToken != rejectedToken) {
-		return credential, nil
-	}
-	if refresh == nil {
-		return Credential{}, ErrRefresh
-	}
-	// Network IO runs outside database transactions. Persist rotated tokens before publishing them to callers.
-	updated, err := refresh(ctx, credential)
-	if err != nil {
-		if errors.Is(err, ErrReauthorize) {
-			if saveErr := s.queries.SetAccountStatus(ctx, db.SetAccountStatusParams{ID: id, Status: "reauth_required", UpdatedAt: s.now().Unix()}); saveErr != nil {
-				return Credential{}, saveErr
-			}
-			return Credential{}, ErrReauthorize
-		}
-		if ctx.Err() != nil {
-			return Credential{}, ctx.Err()
-		}
-		return Credential{}, ErrRefresh
-	}
-	if updated.AccountID != row.AccountID || updated.Kind() != row.Provider {
-		return Credential{}, ErrIdentity
-	}
-	if err := updated.validate(); err != nil {
-		return Credential{}, err
-	}
-	if updated.ExpiresAt <= s.now().Add(minimumValidity).Unix() {
-		return Credential{}, ErrRefresh
-	}
-	if err := s.persist(ctx, s.queries, id, updated, "ready"); err != nil {
-		return Credential{}, err
-	}
-	updated.ProxyURL = credential.ProxyURL
-	return updated, nil
+	delete(s.refreshes, id)
+	return nil
 }
 
 func (s *Service) persist(ctx context.Context, q *db.Queries, id string, c Credential, status string) error {
@@ -425,7 +347,8 @@ func (s *Service) RecordUse(ctx context.Context, id, usedToken string, accepted 
 		return err
 	}
 	// Results from older in-flight requests must not overwrite a later refresh or reauthorization.
-	if credential.AccessToken != usedToken {
+	// A late success cannot repair a refresh token that requires explicit reauthorization.
+	if credential.AccessToken != usedToken || (accepted && row.Status == "reauth_required") {
 		return nil
 	}
 	status := "reauth_required"

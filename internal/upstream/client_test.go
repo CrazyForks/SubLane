@@ -142,6 +142,59 @@ func TestTokenErrorsDoNotExposeProviderBody(t *testing.T) {
 	}
 }
 
+func TestTokenRefreshRequiresExplicitCredentialFailure(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		status    int
+		body      string
+		permanent bool
+	}{
+		{"invalid grant", 400, `{"error":"invalid_grant"}`, true},
+		{"rotated token reused", 401, `{"error":{"code":"refresh_token_reused","message":"synthetic-private"}}`, true},
+		{"invalidated token", 400, `{"error":{"code":"refresh_token_invalidated"}}`, true},
+		{"client configuration", 400, `{"error":"invalid_client"}`, false},
+		{"invalid scope", 400, `{"error":"invalid_scope"}`, false},
+		{"unknown unauthorized", 401, `{"error":"synthetic_unknown","message":"invalid_grant"}`, false},
+		{"proxy error", 400, `<html>synthetic-private</html>`, false},
+		{"server error", 503, `{"error":"invalid_grant"}`, false},
+		{"rate limit", 429, `{"error":"synthetic_limit"}`, false},
+		{"oversized", 400, `{"error":"invalid_grant","detail":"` + strings.Repeat("x", 128<<10) + `"}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client := NewWithTransport(usageTransport(func(*http.Request) (*http.Response, error) {
+				return &http.Response{StatusCode: tc.status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(tc.body))}, nil
+			}))
+			defer client.Close()
+			_, err := client.Refresh(context.Background(), accounts.Credential{RefreshToken: "synthetic-refresh"})
+			if err == nil || errors.Is(err, accounts.ErrReauthorize) != tc.permanent || strings.Contains(err.Error(), "synthetic-private") {
+				t.Fatalf("wrong credential failure classification: %v", err)
+			}
+		})
+	}
+}
+
+func TestTokenRefreshPreservesBoundedRetryAfter(t *testing.T) {
+	for _, tc := range []struct {
+		value    string
+		min, max int64
+	}{
+		{"90", 90, 90}, {"9999999", 3600, 3600}, {"-1", 0, 0}, {"invalid", 0, 0},
+		{time.Now().Add(2 * time.Minute).UTC().Format(http.TimeFormat), 115, 120},
+	} {
+		t.Run(tc.value, func(t *testing.T) {
+			client := NewWithTransport(usageTransport(func(*http.Request) (*http.Response, error) {
+				return &http.Response{StatusCode: 429, Header: http.Header{"Retry-After": {tc.value}}, Body: io.NopCloser(strings.NewReader(`{}`))}, nil
+			}))
+			defer client.Close()
+			_, err := client.Refresh(context.Background(), accounts.Credential{RefreshToken: "synthetic-refresh"})
+			var retry *accounts.RefreshError
+			if !errors.As(err, &retry) || retry.RetryAfter < tc.min || retry.RetryAfter > tc.max {
+				t.Fatalf("retry hint was lost or unbounded: %v", err)
+			}
+		})
+	}
+}
+
 func TestModelsRequestsVersionGatedCatalog(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || r.URL.Path != "/models" {

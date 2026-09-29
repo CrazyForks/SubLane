@@ -9,9 +9,18 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/murongg/SubLane/internal/accounts"
 	"github.com/murongg/SubLane/internal/allocations"
 	"github.com/murongg/SubLane/internal/gateway"
 )
+
+func TestCredentialRefreshFailureHasTemporaryStatusAndRetry(t *testing.T) {
+	w := httptest.NewRecorder()
+	gatewayError(w, &accounts.RefreshError{RetryAfter: 30})
+	if w.Code != http.StatusServiceUnavailable || w.Header().Get("Retry-After") != "30" || !strings.Contains(w.Body.String(), "account_refresh_failed") {
+		t.Fatalf("temporary refresh failure lost retry semantics: %d %s %s", w.Code, w.Header().Get("Retry-After"), w.Body.String())
+	}
+}
 
 func TestAccountQueueFailureIncludesSpecificReasonAndRetry(t *testing.T) {
 	for _, err := range []error{gateway.ErrAccountQueueFull, gateway.ErrAccountWaitTimeout} {

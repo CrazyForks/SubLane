@@ -318,6 +318,8 @@ func gatewayFailure(err error) (int, string) {
 		return 503, "account_unavailable"
 	case errors.Is(err, accounts.ErrReauthorize):
 		return 503, "account_reauthorization_required"
+	case errors.Is(err, accounts.ErrRefresh):
+		return 503, "account_refresh_failed"
 	case errors.Is(err, context.DeadlineExceeded):
 		return 504, "gateway_timeout"
 	case errors.Is(err, upstream.ErrInterrupted):
@@ -350,6 +352,14 @@ func writeGatewayFailure(w http.ResponseWriter, err error, writeError func(http.
 	status, code := gatewayFailure(err)
 	if errors.Is(err, gateway.ErrCatalogUnavailable) {
 		w.Header().Set("Retry-After", "5")
+	}
+	if errors.Is(err, accounts.ErrRefresh) {
+		seconds := int64(30)
+		var refresh *accounts.RefreshError
+		if errors.As(err, &refresh) {
+			seconds = min(3600, max(1, refresh.RetryAfter))
+		}
+		w.Header().Set("Retry-After", strconv.FormatInt(seconds, 10))
 	}
 	if status == 401 {
 		w.Header().Set("WWW-Authenticate", "Bearer")

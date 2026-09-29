@@ -20,6 +20,8 @@ type Credential struct {
 	Email        string                     `json:"email,omitempty"`
 	Plan         string                     `json:"plan,omitempty"`
 	ExpiresAt    int64                      `json:"expires_at"`
+	// Keep rejection with the encrypted token so a restart cannot make it eligible for fallback.
+	Rejected bool `json:"access_token_rejected,omitempty"`
 }
 
 func (c Credential) Kind() string {

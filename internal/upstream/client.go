@@ -162,11 +162,8 @@ func (c *Client) tokens(ctx context.Context, form url.Values, old accounts.Crede
 		return accounts.Credential{}, ErrUpstream
 	}
 	defer response.Body.Close()
-	if response.StatusCode == 400 || response.StatusCode == 401 {
-		return accounts.Credential{}, accounts.ErrReauthorize
-	}
 	if response.StatusCode != 200 {
-		return accounts.Credential{}, ErrUpstream
+		return accounts.Credential{}, tokenFailure(response)
 	}
 	raw, err := readBounded(response.Body, 128<<10)
 	if err != nil {

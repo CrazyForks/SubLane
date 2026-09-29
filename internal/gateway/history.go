@@ -278,7 +278,8 @@ func classify(ctx context.Context, err error) (outcome, code, penalty string) {
 	case errors.Is(err, upstream.ErrInterrupted), errors.Is(err, upstream.ErrResponse):
 		return "error", "stream_interrupted", "upstream_error"
 	case errors.Is(err, accounts.ErrRefresh):
-		return "error", "refresh_failed", "upstream_error"
+		// Credential retries have their own backoff; polling it must not extend model cooldowns.
+		return "error", "refresh_failed", ""
 	case errors.Is(err, upstream.ErrUpstream):
 		return "error", "upstream_unavailable", "upstream_error"
 	default:
