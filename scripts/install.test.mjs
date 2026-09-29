@@ -17,10 +17,13 @@ import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 
 const script = fileURLToPath(new URL("./install.sh", import.meta.url));
-const compose = "services:\n  sublane:\n    image: ${SUBLANE_IMAGE}\n";
-const checksum = createHash("sha256").update(compose).digest("hex");
+const compose = "services:\n  sublane:\n    image: ${SUBLANE_IMAGE}\n    environment:\n      SUBLANE_DEMO: ${SUBLANE_DEMO:-false}\n";
 
 function fixture(t, mode = "", api = {}) {
+  const deployment = mode === "legacy-demo"
+    ? "services:\n  sublane:\n    image: ${SUBLANE_IMAGE}\n"
+    : compose;
+  const checksum = createHash("sha256").update(deployment).digest("hex");
   const root = mkdtempSync(join(tmpdir(), "sublane-installer-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const bin = join(root, "bin");
@@ -29,9 +32,10 @@ function fixture(t, mode = "", api = {}) {
   mkdirSync(archiveRoot);
   writeFileSync(join(archiveRoot, "sublane"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
   writeFileSync(join(archiveRoot, "LICENSE"), "Synthetic license\n");
+  writeFileSync(join(archiveRoot, ".env.example"), mode === "legacy-demo" ? "SUBLANE_ADDR=127.0.0.1:8080\n" : "SUBLANE_DEMO=false\n");
   const archiveName = "sublane_1.2.3_linux_amd64.tar.gz";
   const archivePath = join(root, archiveName);
-  const packed = spawnSync("tar", ["-czf", archivePath, "-C", archiveRoot, "sublane", "LICENSE"]);
+  const packed = spawnSync("tar", ["-czf", archivePath, "-C", archiveRoot, "sublane", "LICENSE", ".env.example"]);
   assert.equal(packed.status, 0, packed.stderr?.toString());
   const archiveChecksum = createHash("sha256").update(readFileSync(archivePath)).digest("hex");
   const mock = `#!${process.execPath}
@@ -40,7 +44,7 @@ const path = require('node:path');
 const command = path.basename(process.argv[1]);
 const args = process.argv.slice(2);
 const mode = process.env.INSTALL_TEST_MODE;
-fs.appendFileSync(process.env.INSTALL_TEST_LOG, JSON.stringify({command, args, image: process.env.SUBLANE_IMAGE, port: process.env.SUBLANE_PORT}) + '\\n');
+fs.appendFileSync(process.env.INSTALL_TEST_LOG, JSON.stringify({command, args, image: process.env.SUBLANE_IMAGE, port: process.env.SUBLANE_PORT, demo: process.env.SUBLANE_DEMO}) + '\\n');
 if (command === 'curl') {
   if (mode === 'download-failure') process.exit(22);
   if (args.some(value => value.endsWith('/readyz'))) {
@@ -68,7 +72,7 @@ if (command === 'curl') {
       ? (mode === 'bad-checksum' ? '0'.repeat(64) : ${JSON.stringify(checksum)}) + '  docker.compose.yaml\\n'
         + (mode === 'bad-checksum' || mode === 'bad-binary-checksum' ? '0'.repeat(64) : process.env.INSTALL_TEST_ARCHIVE_CHECKSUM)
         + '  ' + process.env.INSTALL_TEST_ARCHIVE_NAME + '\\n'
-      : ${JSON.stringify(compose)};
+      : ${JSON.stringify(deployment)};
     fs.writeFileSync(output, body);
   }
 } else if (command === 'docker') {
@@ -112,6 +116,72 @@ function install(f, args = [], piped = false) {
     input: piped ? readFileSync(script) : undefined,
     encoding: "utf8",
     timeout: 15000,
+  });
+}
+
+for (const runtime of ["docker", "binary"]) {
+  test(`persists demo mode in a ${runtime} installation`, (t) => {
+    const f = fixture(t);
+    f.env.SUBLANE_DEMO = "false";
+    const result = install(f, ["--version", "1.2.3", "--runtime", runtime, "--demo", "--non-interactive"], true);
+    assert.equal(result.status, 0, result.stderr);
+    const settings = readFileSync(join(f.target, runtime === "docker" ? ".env" : "sublane.env"), "utf8");
+    assert.match(settings, /^SUBLANE_DEMO=true$/m);
+    assert.match(result.stdout, /demo.*sublane-demo/i);
+    assert.doesNotMatch(result.stdout, /to create the administrator/);
+    if (runtime === "docker") {
+      const calls = f.calls().filter(call => call.args.includes("--project-name"));
+      assert.ok(calls.length >= 3);
+      assert.ok(calls.every(call => call.demo === "true"));
+    } else {
+      writeFileSync(join(f.target, "sublane"), '#!/bin/sh\nprintf "%s" "$SUBLANE_DEMO"\n', { mode: 0o755 });
+      const launch = spawnSync("bash", [join(f.target, "start.sh")], { env: f.env, encoding: "utf8" });
+      assert.equal(launch.status, 0, launch.stderr);
+      assert.equal(launch.stdout, "true");
+    }
+  });
+
+  test(`normal ${runtime} installation ignores inherited demo interpolation`, (t) => {
+    const f = fixture(t);
+    f.env.SUBLANE_DEMO = "true";
+    const result = install(f, ["--version", "1.2.3", "--runtime", runtime, "--non-interactive"]);
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(readFileSync(join(f.target, runtime === "docker" ? ".env" : "sublane.env"), "utf8"), /^SUBLANE_DEMO=false$/m);
+    if (runtime === "docker")
+      assert.ok(f.calls().filter(call => call.args.includes("--project-name")).every(call => call.demo === "false"));
+  });
+
+  test(`rejects ${runtime} releases without demo support before deployment`, (t) => {
+    const f = fixture(t, "legacy-demo");
+    const result = install(f, ["--version", "1.2.3", "--runtime", runtime, "--demo", "--non-interactive"]);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /does not support demo mode/i);
+    assert.equal(existsSync(f.target), false);
+    assert.equal(f.calls().some(call => call.args.includes("up") || call.args.includes("pull") || call.args.includes("enable") || call.args.includes("link")), false);
+    const normal = install(f, ["--version", "1.2.3", "--runtime", runtime, "--non-interactive"]);
+    assert.equal(normal.status, 0, normal.stderr);
+  });
+}
+
+for (const [choice, demo] of [["", "false"], ["1", "false"], ["2", "true"]]) {
+  test(`interactive installation selects ${demo === "true" ? "demo" : "normal"} mode from choice '${choice}'`, (t) => {
+    const f = fixture(t);
+    const source = readFileSync(script, "utf8").replace(/\nmain "\$@"\s*$/, `
+prompt_available() { return 0; }
+prompt_choice() {
+  case "$1" in
+    'Instance mode'*) printf '${choice}' ;;
+    'Proceed with this installation'*) printf 'y' ;;
+    *) printf 'Unexpected prompt: %s' "$1" >&2; return 1 ;;
+  esac
+}
+main "$@"
+`);
+    const result = spawnSync("bash", ["-s", "--", "--version", "1.2.3", "--runtime", "docker", "--proxy", "none"], {
+      cwd: f.root, env: f.env, input: source, encoding: "utf8", timeout: 15000,
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.ok(readFileSync(join(f.target, ".env"), "utf8").split("\n").includes(`SUBLANE_DEMO=${demo}`));
   });
 }
 
