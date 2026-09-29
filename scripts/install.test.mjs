@@ -19,7 +19,7 @@ import { test } from "node:test";
 const script = fileURLToPath(new URL("./install.sh", import.meta.url));
 const compose = "services:\n  sublane:\n    image: ${SUBLANE_IMAGE}\n    environment:\n      SUBLANE_DEMO: ${SUBLANE_DEMO:-false}\n";
 
-function fixture(t, mode = "", api = {}) {
+function fixture(t, mode = "", api = {}, portTool = "ss") {
   const deployment = mode === "legacy-demo"
     ? "services:\n  sublane:\n    image: ${SUBLANE_IMAGE}\n"
     : compose;
@@ -84,10 +84,23 @@ if (command === 'curl') {
 } else if (command === 'systemctl') {
   if (mode === 'systemd-failure' && args.includes('enable')) process.exit(1);
   if (mode === 'inactive-binary' && args.includes('is-active')) process.exit(1);
+} else if (command === 'ss' || command === 'lsof') {
+  if (mode === 'port-check-failure') {
+    process.stderr.write('Synthetic socket inspection failure\\n');
+    process.exit(1);
+  }
+  process.stdout.write(process.env.INSTALL_TEST_LISTENERS);
+  if (command === 'lsof' && !process.env.INSTALL_TEST_LISTENERS) process.exit(1);
 }
 `;
-  for (const name of ["curl", "docker", "uname", "systemctl"])
+  for (const name of ["curl", "docker", "uname", "systemctl", "ss", "lsof"])
     writeFileSync(join(bin, name), mock, { mode: 0o755 });
+  const shellEnv = join(root, "shell.env");
+  writeFileSync(shellEnv, `command() {
+  if [[ $1 == -v && ( $2 == ss || $2 == lsof ) && $2 != ${portTool} ]]; then return 1; fi
+  builtin command "$@"
+}
+`);
   const log = join(root, "commands.jsonl");
   return {
     root,
@@ -95,8 +108,10 @@ if (command === 'curl') {
     env: {
       ...process.env,
       PATH: `${bin}:${process.env.PATH}`,
+      BASH_ENV: shellEnv,
       INSTALL_TEST_LOG: log,
       INSTALL_TEST_MODE: mode,
+      INSTALL_TEST_LISTENERS: "",
       INSTALL_TEST_API: JSON.stringify(api),
       INSTALL_TEST_ARCHIVE: archivePath,
       INSTALL_TEST_ARCHIVE_CHECKSUM: archiveChecksum,
@@ -118,6 +133,75 @@ function install(f, args = [], piped = false) {
     timeout: 15000,
   });
 }
+
+for (const runtime of ["docker", "binary"]) {
+  test(`rejects an occupied ${runtime} port before downloading or starting services`, (t) => {
+    const f = fixture(t);
+    f.env.INSTALL_TEST_LISTENERS = "LISTEN 0 128 127.0.0.1:18080 0.0.0.0:*\n";
+    const result = install(f, ["--version", "1.2.3", "--runtime", runtime, "--port", "18080"], true);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /127\.0\.0\.1:18080.*already in use/i);
+    assert.match(result.stderr, /--port/);
+    assert.equal(existsSync(f.target), false);
+    assert.ok(f.calls().every(call => call.command === "ss"));
+  });
+}
+
+for (const [tool, addresses] of [
+  ["ss", ["0.0.0.0:8080", "*:8080", "[::]:8080", "[::ffff:127.0.0.1]:8080"]],
+  ["lsof", ["127.0.0.1:8080", "*:8080", "[::ffff:127.0.0.1]:8080"]],
+]) {
+  test(`detects loopback and wildcard port conflicts with ${tool}`, (t) => {
+    for (const address of addresses) {
+      const f = fixture(t, "", {}, tool);
+      f.env.INSTALL_TEST_LISTENERS = tool === "ss"
+        ? `LISTEN 0 128 ${address} *:*\n`
+        : `p123\nf3\nn${address}\n`;
+      const result = install(f, ["--version", "1.2.3"]);
+      assert.notEqual(result.status, 0, address);
+      assert.match(result.stderr, /127\.0\.0\.1:8080.*already in use/i);
+      assert.equal(existsSync(f.target), false);
+      assert.ok(f.calls().every(call => call.command === tool));
+    }
+  });
+
+  test(`allows unrelated interfaces and proxy ports with ${tool}`, (t) => {
+    const f = fixture(t, "", {}, tool);
+    f.env.INSTALL_TEST_LISTENERS = tool === "ss"
+      ? "LISTEN 0 128 127.0.0.2:8080 *:*\nLISTEN 0 128 [::1]:8080 *:*\nLISTEN 0 128 *:80 *:*\nLISTEN 0 128 *:443 *:*\nLISTEN 0 128 *:18080 *:*\n"
+      : "p123\nf3\nn127.0.0.2:8080\nf4\nn[::1]:8080\nf5\nn*:80\nf6\nn*:443\nf7\nn*:18080\n";
+    const result = install(f, ["--version", "1.2.3", "--proxy", "nginx"]);
+    assert.equal(result.status, 0, result.stderr);
+    assert.ok(f.calls().some(call => call.command === tool));
+  });
+
+  test(`stops when ${tool} cannot inspect the port`, (t) => {
+    const f = fixture(t, "port-check-failure", {}, tool);
+    const result = install(f, ["--version", "1.2.3"]);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /Could not check.*127\.0\.0\.1:8080/i);
+    assert.equal(existsSync(f.target), false);
+    assert.ok(f.calls().every(call => call.command === tool));
+  });
+
+  test(`accepts an unused port with ${tool}`, (t) => {
+    const f = fixture(t, "", {}, tool);
+    const result = install(f, ["--version", "1.2.3", "--port", "18851"]);
+    assert.equal(result.status, 0, result.stderr);
+    const check = f.calls().find(call => call.command === tool);
+    assert.ok(check);
+    assert.ok(check.args.some(arg => arg.includes("18851")));
+  });
+}
+
+test("explains how to enable port inspection when neither utility is installed", (t) => {
+  const f = fixture(t, "", {}, "none");
+  const result = install(f, ["--version", "1.2.3"]);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Install.*ss.*lsof/i);
+  assert.equal(existsSync(f.target), false);
+  assert.equal(f.calls().length, 0);
+});
 
 for (const runtime of ["docker", "binary"]) {
   test(`persists demo mode in a ${runtime} installation`, (t) => {
