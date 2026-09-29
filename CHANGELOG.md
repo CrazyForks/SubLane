@@ -2,6 +2,18 @@
 
 All notable changes are documented here in [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
+## [0.2.0] - 2026-09-29
+
+### Added
+
+- Support read-only demo deployments
+- Add isolated read-only server demo (#54)
+- Add guided setup and workspace alerts
+- Check local ports before deployment
+
+### Fixed
+
+- Keep workspace alert settings readable
 ## [0.1.0] - 2026-09-29
 
 ### Added
@@ -137,6 +149,7 @@ All notable changes are documented here in [Keep a Changelog](https://keepachang
 - Distinguish remaining quota with status colors
 - Restore version-gated model discovery
 
+[0.2.0]: https://github.com/murongg/SubLane/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/murongg/SubLane/compare/v0.1.0-rc.9...v0.1.0
 [0.1.0-rc.9]: https://github.com/murongg/SubLane/compare/v0.1.0-rc.8...v0.1.0-rc.9
 [0.1.0-rc.8]: https://github.com/murongg/SubLane/compare/v0.1.0-rc.7...v0.1.0-rc.8
