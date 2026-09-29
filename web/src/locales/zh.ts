@@ -1,6 +1,27 @@
 import type { en } from './en'
 
 export const zh: Record<keyof typeof en, string> = {
+  modelPrices: '模型价格',
+  pricingDescription:
+    '当前参考单价用于请求费用估算和新建额度版本，并非订阅实际账单。已有额度版本按各自保存的价格计算。价格目录不代表模型使用权限，可用模型请查看密钥的模型列表。',
+  pricingUnit: '美元 / 每 100 万 Token',
+  pricingSearch: '搜索模型价格',
+  pricingModel: '模型',
+  pricingInput: '输入',
+  pricingCached: '缓存输入',
+  pricingOutput: '输出',
+  pricingSource: '来源',
+  pricingSourceRemote: '远程价格目录',
+  pricingSourceCache: '本地缓存',
+  pricingSourceFallback: '回退价格',
+  pricingSourceOverride: '自定义价格',
+  pricingSourceUnknown: '价格目录',
+  pricingLoading: '正在加载模型价格…',
+  pricingLoadFailed: '无法加载模型价格，请刷新重试。',
+  pricingReloadFailed: '无法刷新价格，正在显示上次加载的目录。',
+  pricingEmpty: '暂无模型价格，价格目录同步后请重新加载。',
+  pricingNoMatch: '没有匹配的模型价格。',
+  pricingRange: '第 {{start}}–{{end}} 项，共 {{count}} 个模型',
   demoTitle: '只读演示',
   demoDescription:
     '浏览示例账号、账号池与用量。修改、凭据操作和真实 API 调用已禁用，演示重启后数据重置。',

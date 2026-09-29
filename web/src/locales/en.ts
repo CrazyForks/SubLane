@@ -1,4 +1,27 @@
 export const en = {
+  modelPrices: 'Model prices',
+  pricingDescription:
+    'Current reference prices used for request cost estimates and new allowance revisions. These are not subscription charges. Existing allowance revisions use their saved prices. A listed price does not guarantee model access; check your key’s model catalog.',
+  pricingUnit: 'USD per 1 million tokens',
+  pricingSearch: 'Search model prices',
+  pricingModel: 'Model',
+  pricingInput: 'Input',
+  pricingCached: 'Cached input',
+  pricingOutput: 'Output',
+  pricingSource: 'Source',
+  pricingSourceRemote: 'Remote catalog',
+  pricingSourceCache: 'Local cache',
+  pricingSourceFallback: 'Fallback prices',
+  pricingSourceOverride: 'Custom prices',
+  pricingSourceUnknown: 'Price catalog',
+  pricingLoading: 'Loading model prices…',
+  pricingLoadFailed: 'Could not load model prices. Refresh to try again.',
+  pricingReloadFailed:
+    'Could not reload prices. Showing the last loaded catalog.',
+  pricingEmpty:
+    'No model prices are available yet. Reload after the price catalog has synced.',
+  pricingNoMatch: 'No matching model prices.',
+  pricingRange: '{{start}}–{{end}} of {{count}} models',
   demoTitle: 'Read-only demo',
   demoDescription:
     'Explore sample accounts, pools, and usage. Changes, credential actions, and live API calls are disabled. Data resets when the demo restarts.',

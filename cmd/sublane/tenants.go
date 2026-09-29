@@ -109,7 +109,7 @@ func (r *tenantRegistry) acquire(id int64) *tenantRuntime {
 		Ping: r.db.PingContext, Audit: audit.NewForTenant(r.db, id), Auth: r.auth,
 		Alerts: r.alerts,
 		Keys:   apikey.NewForTenant(r.db, r.vault, id), Accounts: accountService,
-		OAuth: oauth.New(accountService, r.provider), Gateway: forwarding,
+		OAuth: oauth.New(accountService, r.provider), Gateway: forwarding, Pricing: r.pricing,
 		Groups: groups.NewForTenant(r.db, id), Tenants: r.tenants, TenantID: id,
 		PublicURL: r.publicURL, TrustedProxies: r.trustedProxies, LoginLimiter: r.loginLimiter, EnrollmentLimiter: r.enrollmentLimiter,
 		CodexVersions: codexVersions, TimeZone: r.timeZone,

@@ -11,6 +11,27 @@ import (
 	"testing"
 )
 
+func TestListReturnsSortedIndependentPrices(t *testing.T) {
+	s := NewStatic(map[string]Price{
+		"synthetic-zeta":  {Input: 2000000, Cached: 200000, Output: 8000000, Source: "override"},
+		"synthetic-alpha": {Input: 1250000, Cached: 125000, Output: 10000000, Source: "remote"},
+	})
+	list := s.List()
+	if len(list) != 2 || list[0].Model != "synthetic-alpha" || list[1].Model != "synthetic-zeta" {
+		t.Fatalf("unexpected catalog: %+v", list)
+	}
+	if list[0].Input != 1250000 || list[0].Cached != 125000 || list[0].Output != 10000000 || list[0].Source != "remote" {
+		t.Fatalf("changed price units or source: %+v", list[0])
+	}
+	list[0].Input = 1
+	if price, _ := s.Lookup("synthetic-alpha"); price.Input != 1250000 {
+		t.Fatal("listing mutated the shared catalog")
+	}
+	if got := NewStatic(nil).List(); got == nil || len(got) != 0 {
+		t.Fatalf("empty catalog must be a JSON array: %+v", got)
+	}
+}
+
 func TestParseLiteLLMPriceAndModelAliases(t *testing.T) {
 	prices, err := parsePrices([]byte(`{"gpt-5.1-codex":{"input_cost_per_token":0.00000125,"cache_read_input_token_cost":0.000000125,"output_cost_per_token":0.00001}}`), "remote")
 	if err != nil {

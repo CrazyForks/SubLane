@@ -20,6 +20,7 @@ import (
 	"github.com/murongg/SubLane/internal/gateway"
 	"github.com/murongg/SubLane/internal/groups"
 	"github.com/murongg/SubLane/internal/oauth"
+	"github.com/murongg/SubLane/internal/pricing"
 	"github.com/murongg/SubLane/internal/tenants"
 	"github.com/murongg/SubLane/internal/timezone"
 	"github.com/murongg/SubLane/internal/upstream"
@@ -40,6 +41,7 @@ type Options struct {
 	Accounts          *accounts.Service
 	OAuth             *oauth.Flow
 	Gateway           *gateway.Service
+	Pricing           *pricing.Service
 	Groups            *groups.Service
 	Tenants           *tenants.Service
 	TenantID          int64
@@ -140,6 +142,12 @@ func New(o Options) http.Handler {
 			routeErrors(workspaces)
 			workspaces.Use(login.requireUser)
 			(&tenantHTTP{service: o.Tenants, tenantID: tenantID}).register(workspaces)
+		})
+		api.Route("/pricing", func(prices chi.Router) {
+			routeErrors(prices)
+			prices.Use(login.requireUser)
+			prices.NotFound(requireAdminRole(http.HandlerFunc(notFound)).ServeHTTP)
+			prices.Get("/", (&pricingHTTP{service: o.Pricing}).catalog)
 		})
 		api.Route("/connection", func(common chi.Router) {
 			routeErrors(common)

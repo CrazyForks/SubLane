@@ -45,6 +45,10 @@ func TestDemoLoginReadOnlyAndCleanup(t *testing.T) {
 		t.Fatalf("login: %d %s", login.Code, login.Body.String())
 	}
 	cookie := login.Result().Cookies()[0]
+	prices := call("GET", "/api/pricing", "", cookie)
+	if prices.Code != 200 || !strings.Contains(prices.Body.String(), `"prices":[]`) {
+		t.Fatalf("offline price catalog: %d %s", prices.Code, prices.Body.String())
+	}
 	alertSettings := call("GET", "/api/alerts", "", cookie)
 	if alertSettings.Code != 200 || !strings.Contains(alertSettings.Body.String(), `"enabled":false`) || !strings.Contains(alertSettings.Body.String(), `"configured":false`) {
 		t.Fatalf("read-only alert settings: %d %s", alertSettings.Code, alertSettings.Body.String())

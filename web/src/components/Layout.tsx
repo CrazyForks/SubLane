@@ -9,6 +9,7 @@ import {
   ChevronRight,
   ShieldCheck,
   ChartNoAxesCombined,
+  CircleDollarSign,
   ListChecks,
   KeyRound,
   LayoutDashboard,
@@ -54,6 +55,7 @@ const navigation = [
       { to: '/', label: 'overview', icon: LayoutDashboard },
       { to: '/keys', label: 'apiKeys', icon: KeyRound },
       { to: '/requests', label: 'requests', icon: ListChecks },
+      { to: '/pricing', label: 'modelPrices', icon: CircleDollarSign },
     ],
   },
   {

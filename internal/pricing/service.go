@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -27,6 +28,11 @@ type Price struct {
 	Cached int64  `json:"cached"`
 	Output int64  `json:"output"`
 	Source string `json:"source"`
+}
+
+type ModelPrice struct {
+	Model string `json:"model"`
+	Price
 }
 
 type Config struct {
@@ -186,6 +192,17 @@ func (s *Service) Resolve(models []string) map[string]Price {
 		}
 	}
 	return result
+}
+
+func (s *Service) List() []ModelPrice {
+	s.mu.RLock()
+	prices := make([]ModelPrice, 0, len(s.prices))
+	for model, price := range s.prices {
+		prices = append(prices, ModelPrice{Model: model, Price: price})
+	}
+	s.mu.RUnlock()
+	sort.Slice(prices, func(i, j int) bool { return prices[i].Model < prices[j].Model })
+	return prices
 }
 
 func (s *Service) Refresh(ctx context.Context) error {
