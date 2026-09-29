@@ -32,7 +32,9 @@ An interactive terminal guides the choices. Without one, defaults are a normal
 instance, Docker and no proxy; pass flags to choose otherwise. Proxy files are
 generated for review but are never installed into Caddy or Nginx automatically.
 
-Requires Bash, curl, and sha256sum or shasum. Docker mode needs Compose;
+Requires Bash, curl, sha256sum or shasum, and ss or lsof for port checks.
+The selected backend port is checked before download and again before deployment.
+Docker mode needs Compose;
 binary mode needs Linux and a working systemd user manager.
 Automatic version selection also requires jq.
 Existing directories are never overwritten. Use the deployment guide for upgrades.
@@ -42,6 +44,37 @@ HELP
 
 cleanup() {
   if [[ -n ${install_stage:-} ]]; then rm -rf -- "$install_stage"; fi
+}
+
+# This is only a snapshot; startup readiness must still catch later bind conflicts.
+check_port() {
+  local listeners tool status=0
+  if command -v ss >/dev/null; then
+    tool=ss
+    listeners=$(ss -H -ltn "sport = :$install_port" 2>&1) \
+      || fail "Could not check 127.0.0.1:$install_port with ss."
+  elif command -v lsof >/dev/null; then
+    tool=lsof
+    listeners=$(lsof -nP -a -iTCP:"$install_port" -sTCP:LISTEN -Fn 2>&1) || status=$?
+    # lsof returns 1 with no output when no listener matches; diagnostics indicate a failed check.
+    [[ $status == 0 || ( $status == 1 && -z $listeners ) ]] \
+      || fail "Could not check 127.0.0.1:$install_port with lsof."
+  else
+    fail 'Install ss (iproute2) or lsof to check the selected port before deployment.'
+  fi
+  # Wildcard listeners can block loopback binding; ports on unrelated addresses need not block it.
+  if printf '%s\n' "$listeners" | awk -v port="$install_port" -v tool="$tool" '
+    {
+      address = tool == "ss" ? $4 : substr($0, 2)
+      if (address == "127.0.0.1:" port || address == "0.0.0.0:" port ||
+          address == "*:" port || address == "[::]:" port || address == ":::" port ||
+          address == "[::ffff:127.0.0.1]:" port || address == "::ffff:127.0.0.1:" port)
+        occupied = 1
+    }
+    END { exit !occupied }
+  '; then
+    fail "127.0.0.1:$install_port is already in use or covered by a wildcard listener. Choose an unused port with --port (for example, --port 8088)."
+  fi
 }
 
 compose() {
@@ -326,6 +359,7 @@ install_docker() {
   compose "$install_stage" config --quiet
   printf 'Pulling %s...\n' "$install_image"
   compose "$install_stage" pull || fail 'Image pull failed; no installation was created.'
+  check_port
   mkdir -p -- "$(dirname "$install_dir")"
   # Claim the directory atomically only after verification; simultaneous installers must not overwrite it.
   mkdir -- "$install_dir" || fail "Could not create $install_dir; existing files were left unchanged."
@@ -343,6 +377,7 @@ install_docker() {
 }
 
 install_binary() {
+  check_port
   mkdir -p -- "$(dirname "$install_dir")"
   mkdir -- "$install_dir" || fail "Could not create $install_dir; existing files were left unchanged."
   cp -R "$install_stage/unpacked/." "$install_dir/"
@@ -490,6 +525,7 @@ main() {
   for dependency in curl awk mktemp; do
     command -v "$dependency" >/dev/null || fail "Install $dependency first."
   done
+  check_port
   if [[ -z $install_version ]]; then
     command -v jq >/dev/null || fail 'Install jq for automatic version selection, or pass --version explicitly.'
   fi
