@@ -78,8 +78,8 @@ func (t *oauthTransport) RoundTrip(request *http.Request) (*http.Response, error
 		return nil, ErrResponse
 	}
 	if request.URL.Host == "oauth2.googleapis.com" && request.URL.Path == "/token" {
-		if response.StatusCode == 400 || response.StatusCode == 401 {
-			t.record(accounts.ErrReauthorize)
+		if response.StatusCode != http.StatusOK {
+			t.record(tokenResponseFailure(response.StatusCode, response.Header, body))
 		}
 		if response.StatusCode == 200 {
 			var token struct {

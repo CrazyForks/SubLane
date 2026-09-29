@@ -15,6 +15,7 @@ import (
 	"github.com/murongg/SubLane/internal/auth"
 	"github.com/murongg/SubLane/internal/groups"
 	"github.com/murongg/SubLane/internal/storage"
+	"github.com/murongg/SubLane/internal/storage/db"
 	"github.com/murongg/SubLane/internal/tenants"
 	"github.com/murongg/SubLane/internal/vault"
 )
@@ -53,6 +54,34 @@ func fixture(t *testing.T, sender senderFunc) (*Service, string) {
 	s := New(conn, v, sender)
 	s.now = func() time.Time { return time.Unix(1900000000, 0) }
 	return s, account.ID
+}
+
+func TestAlertsRecognizeClaudeAndAntigravityAvailability(t *testing.T) {
+	for _, provider := range []string{"claude", "antigravity"} {
+		t.Run(provider, func(t *testing.T) {
+			ctx := context.Background()
+			s, id := fixture(t, nil)
+			if _, err := s.conn.Exec("UPDATE accounts SET provider=?,status='ready' WHERE id=?", provider, id); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := groups.New(s.conn).Save(ctx, 0, groups.Input{Name: "Synthetic pool", Enabled: true, AccountIDs: []string{id}}); err != nil {
+				t.Fatal(err)
+			}
+			q := db.New(s.conn)
+			input := db.ListAlertSignalsParams{TenantID: 1, Since: s.now().Unix() - 300, Now: s.now().Unix()}
+			signals, err := q.ListAlertSignals(ctx, input)
+			if err != nil || len(signals) != 0 {
+				t.Fatalf("healthy %s account caused an alert: %+v %v", provider, signals, err)
+			}
+			if _, err := s.conn.Exec("UPDATE accounts SET status='reauth_required' WHERE id=?", id); err != nil {
+				t.Fatal(err)
+			}
+			signals, err = q.ListAlertSignals(ctx, input)
+			if err != nil || len(signals) != 2 {
+				t.Fatalf("%s reauthorization and pool alerts missing: %+v %v", provider, signals, err)
+			}
+		})
+	}
 }
 
 func TestAlertsEncryptDeduplicateSurviveRestartAndRecover(t *testing.T) {

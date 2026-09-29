@@ -334,103 +334,120 @@ it('searches network proxies when connecting an account and submits the selected
   await waitFor(() => expect(imported?.proxy_id).toBe('mock-west'))
 })
 
-it('shows three providers with only Codex selectable and starts its authorization', async () => {
-  const fetch = vi
-    .fn()
-    .mockImplementation((url: string, init?: RequestInit) => {
-      if (url === '/api/auth/state')
-        return Promise.resolve(response(authenticated))
-      if (url === '/api/accounts/oauth') {
-        expect(JSON.parse(String(init?.body)).provider).toBe('codex')
-        return Promise.resolve(
-          response(
-            {
-              url: 'https://auth.openai.com/oauth/authorize?state=synthetic-state',
-              state: 'synthetic-state',
-              expires_at: 9999999999,
-              callback_url: 'http://localhost:1455/auth/callback',
-            },
-            201,
-          ),
-        )
-      }
-      return Promise.resolve(response({ accounts: [] }))
-    })
-  vi.stubGlobal('fetch', fetch)
-  open()
-  await screen.findByText('No subscription accounts')
-  const user = userEvent.setup()
-  await user.click(screen.getByRole('button', { name: 'Add account' }))
-  const choices = screen.getByRole('group', { name: 'Service provider' })
-  expect(within(choices).getAllByRole('button')).toHaveLength(3)
-  expect(
-    within(choices).getByRole('button', { name: 'Codex', pressed: true }),
-  ).toBeTruthy()
-  expect(
-    (
-      within(choices).getByRole('button', {
-        name: 'Claude',
-      }) as HTMLButtonElement
-    ).disabled,
-  ).toBe(true)
-  expect(
-    (
-      within(choices).getByRole('button', {
-        name: 'Antigravity (Gemini)',
-      }) as HTMLButtonElement
-    ).disabled,
-  ).toBe(true)
-  await user.type(screen.getByLabelText('Account name'), 'Synthetic Codex')
-  await user.click(screen.getByRole('button', { name: 'Start authorization' }))
-  expect(
-    (
-      await screen.findByRole('link', { name: 'Open provider authorization' })
-    ).getAttribute('href'),
-  ).toContain('auth.openai.com/oauth/authorize')
-  expect(
-    screen.getByPlaceholderText('http://localhost:1455/auth/callback?...'),
-  ).toBeTruthy()
-  for (const button of within(choices).getAllByRole('button')) {
-    expect((button as HTMLButtonElement).disabled).toBe(true)
-  }
-})
+it.each([
+  ['codex', 'Codex', 'auth.openai.com', 'http://localhost:1455/auth/callback'],
+  ['claude', 'Claude', 'claude.ai', 'http://localhost:54545/callback'],
+  [
+    'antigravity',
+    'Antigravity (Gemini)',
+    'accounts.google.com',
+    'http://localhost:51121/oauth-callback',
+  ],
+])(
+  'starts %s authorization with its own callback',
+  async (provider, label, host, callback) => {
+    const fetch = vi
+      .fn()
+      .mockImplementation((url: string, init?: RequestInit) => {
+        if (url === '/api/auth/state')
+          return Promise.resolve(response(authenticated))
+        if (url === '/api/accounts/oauth') {
+          expect(JSON.parse(String(init?.body)).provider).toBe(provider)
+          return Promise.resolve(
+            response(
+              {
+                url: `https://${host}/oauth/authorize?state=synthetic-state`,
+                state: 'synthetic-state',
+                expires_at: 9999999999,
+                callback_url: callback,
+              },
+              201,
+            ),
+          )
+        }
+        return Promise.resolve(response({ accounts: [] }))
+      })
+    vi.stubGlobal('fetch', fetch)
+    open()
+    await screen.findByText('No subscription accounts')
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: 'Add account' }))
+    const choices = screen.getByRole('group', { name: 'Service provider' })
+    expect(within(choices).getAllByRole('button')).toHaveLength(3)
+    for (const button of within(choices).getAllByRole('button')) {
+      expect((button as HTMLButtonElement).disabled).toBe(false)
+    }
+    await user.click(within(choices).getByRole('button', { name: label }))
+    expect(
+      within(choices).getByRole('button', { name: label, pressed: true }),
+    ).toBeTruthy()
+    await user.type(
+      screen.getByLabelText('Account name'),
+      'Synthetic subscription',
+    )
+    await user.click(
+      screen.getByRole('button', { name: 'Start authorization' }),
+    )
+    expect(
+      (
+        await screen.findByRole('link', { name: 'Open provider authorization' })
+      ).getAttribute('href'),
+    ).toContain(host)
+    expect(screen.getByPlaceholderText(`${callback}?...`)).toBeTruthy()
+    for (const button of within(choices).getAllByRole('button')) {
+      expect((button as HTMLButtonElement).disabled).toBe(true)
+    }
+  },
+)
 
-it('shows a stored legacy account as unavailable without reconnect actions', async () => {
-  vi.stubGlobal(
-    'fetch',
-    vi.fn().mockImplementation((url: string) => {
-      if (url === '/api/auth/state')
-        return Promise.resolve(response(authenticated))
-      return Promise.resolve(
-        response({
-          accounts: [{ ...account, provider: 'claude', status: 'ready' }],
-        }),
-      )
-    }),
-  )
-  open()
-  const card = (await screen.findByText('Test subscription')).closest(
-    'article',
-  )!
-  expect(
-    within(card).getAllByText('This provider is temporarily disabled.'),
-  ).toHaveLength(2)
-  expect(
-    (
+it.each(['claude', 'antigravity'] as const)(
+  'lets a ready %s account verify and reauthorize without reporting fake quota',
+  async (provider) => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation((url: string) => {
+        if (url === '/api/auth/state')
+          return Promise.resolve(response(authenticated))
+        return Promise.resolve(
+          response({ accounts: [{ ...account, provider, status: 'ready' }] }),
+        )
+      }),
+    )
+    open()
+    const card = (await screen.findByText('Test subscription')).closest(
+      'article',
+    )!
+    expect(
+      (
+        within(card).getByRole('button', {
+          name: 'Verify connection for Test subscription',
+        }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(false)
+    expect(
+      within(card).getByText(
+        'Quota reporting is not available for this provider yet.',
+      ),
+    ).toBeTruthy()
+    const user = userEvent.setup()
+    await user.click(
       within(card).getByRole('button', {
-        name: 'Verify connection for Test subscription',
-      }) as HTMLButtonElement
-    ).disabled,
-  ).toBe(true)
-  await userEvent.setup().click(
-    within(card).getByRole('button', {
-      name: 'Actions for Test subscription',
-    }),
-  )
-  expect(screen.queryByRole('menuitem', { name: 'Reauthorize' })).toBeNull()
-  expect(screen.queryByRole('menuitem', { name: 'Enable account' })).toBeNull()
-  expect(screen.getByRole('menuitem', { name: 'Remove account' })).toBeTruthy()
-})
+        name: 'Actions for Test subscription',
+      }),
+    )
+    expect(
+      screen.getByRole('menuitem', { name: 'Disable account' }),
+    ).toBeTruthy()
+    await user.click(screen.getByRole('menuitem', { name: 'Reauthorize' }))
+    const dialog = await screen.findByRole('dialog')
+    expect(
+      within(dialog).getByRole('button', {
+        name: provider === 'claude' ? 'Claude' : 'Antigravity (Gemini)',
+        pressed: true,
+      }),
+    ).toBeTruthy()
+  },
+)
 
 it.each([1, 8, 30])(
   'updates an account concurrency limit to %i from scheduling settings',

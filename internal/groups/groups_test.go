@@ -245,7 +245,7 @@ func TestConnectionReadinessOnlyUsesAuthorizedGroups(t *testing.T) {
 	}
 }
 
-func TestConnectionReadinessExcludesPausedProviders(t *testing.T) {
+func TestConnectionReadinessIncludesEnabledSubscriptionProviders(t *testing.T) {
 	connection, service, member, account := fixture(t)
 	ctx := context.Background()
 	if _, err := connection.ExecContext(ctx, "UPDATE accounts SET provider='claude' WHERE id=?", account.ID); err != nil {
@@ -255,16 +255,30 @@ func TestConnectionReadinessExcludesPausedProviders(t *testing.T) {
 		t.Fatal(err)
 	}
 	choices, err := service.Available(ctx, 1)
-	if err != nil || len(choices) != 1 || choices[0].AccountCount != 0 {
-		t.Fatal("paused account counted as available", choices, err)
+	if err != nil || len(choices) != 1 || choices[0].AccountCount != 1 {
+		t.Fatal("Claude account missing from available pool", choices, err)
 	}
 	status, err := service.Connection(ctx, 1)
-	if err != nil || status != "not_configured" {
-		t.Fatal("paused provider made gateway appear ready", status, err)
+	if err != nil || status != "ready" {
+		t.Fatal("Claude pool was not ready", status, err)
 	}
 	status, err = service.Connection(ctx, member.ID)
 	if err != nil || status != "not_configured" {
-		t.Fatal("paused provider made member ready", status, err)
+		t.Fatal("ungranted pool made member ready", status, err)
+	}
+	if _, err := connection.ExecContext(ctx, "UPDATE accounts SET provider='antigravity' WHERE id=?", account.ID); err != nil {
+		t.Fatal(err)
+	}
+	status, err = service.Connection(ctx, 1)
+	if err != nil || status != "ready" {
+		t.Fatal("Antigravity pool was not ready", status, err)
+	}
+	if _, err := connection.ExecContext(ctx, "UPDATE accounts SET enabled=0 WHERE id=?", account.ID); err != nil {
+		t.Fatal(err)
+	}
+	status, err = service.Connection(ctx, 1)
+	if err != nil || status != "not_configured" {
+		t.Fatal("disabled subscription made pool ready", status, err)
 	}
 }
 

@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -15,8 +17,13 @@ import (
 	"github.com/murongg/SubLane/internal/server"
 	"github.com/murongg/SubLane/internal/storage"
 	"github.com/murongg/SubLane/internal/tenants"
+	"github.com/murongg/SubLane/internal/upstream"
 	"github.com/murongg/SubLane/internal/vault"
 )
+
+type subscriptionTransport func(*http.Request) (*http.Response, error)
+
+func (f subscriptionTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
 func TestRuntimeRoutesManagementToOwnedWorkspace(t *testing.T) {
 	ctx := context.Background()
@@ -55,23 +62,50 @@ func TestRuntimeRoutesManagementToOwnedWorkspace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	provider := upstream.NewWithTransport(subscriptionTransport(func(r *http.Request) (*http.Response, error) {
+		body := `{"data":[{"id":"synthetic-model"}]}`
+		if strings.Contains(r.URL.Path, "fetchAvailableModels") {
+			body = `{"models":{"synthetic-model":{}}}`
+		}
+		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}, nil
+	}))
+	defer provider.Close()
 	registry := &tenantRegistry{ctx: ctx, db: connection, vault: cipher, auth: identity,
-		tenants: tenants.New(connection), started: time.Now()}
+		tenants: tenants.New(connection), provider: provider, started: time.Now()}
 	defer registry.Close()
 	h := server.NewMulti(connection, identity, tenants.New(connection), "", registry.Handler)
 	owner, err := identity.Login(ctx, member.Username, "synthetic-password")
 	if err != nil {
 		t.Fatal(err)
 	}
-	paused := httptest.NewRequest(http.MethodPost, "/api/accounts/import", strings.NewReader(`{"provider":"claude","name":"Synthetic paused","auth_json":"{}"}`))
-	paused.Header.Set("X-SubLane-Workspace", strconv.FormatInt(workspace.ID, 10))
-	paused.Header.Set("Origin", "http://example.com")
-	paused.Header.Set("Content-Type", "application/json")
-	paused.AddCookie(&http.Cookie{Name: "sublane_session", Value: owner.Token})
-	pausedResponse := httptest.NewRecorder()
-	h.ServeHTTP(pausedResponse, paused)
-	if pausedResponse.Code != http.StatusConflict || !strings.Contains(pausedResponse.Body.String(), "provider_disabled") {
-		t.Fatalf("paused provider import: %d %s", pausedResponse.Code, pausedResponse.Body.String())
+	for _, kind := range []string{"claude", "antigravity"} {
+		input, _ := json.Marshal(map[string]string{"provider": kind, "name": "Synthetic " + kind, "auth_json": `{"access_token":"synthetic-access","refresh_token":"synthetic-refresh","email":"member@example.test","expired":"2030-01-01T00:00:00Z","project_id":"synthetic-project"}`})
+		request := func(path, body string) *httptest.ResponseRecorder {
+			req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+			req.Header.Set("X-SubLane-Workspace", strconv.FormatInt(workspace.ID, 10))
+			req.Header.Set("Origin", "http://example.com")
+			req.Header.Set("Content-Type", "application/json")
+			req.AddCookie(&http.Cookie{Name: "sublane_session", Value: owner.Token})
+			out := httptest.NewRecorder()
+			h.ServeHTTP(out, req)
+			return out
+		}
+		imported := request("/api/accounts/import", string(input))
+		if imported.Code != http.StatusCreated {
+			t.Fatalf("%s subscription import: %d %s", kind, imported.Code, imported.Body.String())
+		}
+		var account struct{ ID string }
+		if err := json.Unmarshal(imported.Body.Bytes(), &account); err != nil {
+			t.Fatal(err)
+		}
+		verified := request("/api/accounts/"+account.ID+"/check", `{}`)
+		if verified.Code != http.StatusOK || !strings.Contains(verified.Body.String(), "synthetic-model") {
+			t.Fatalf("%s subscription verification: %d %s", kind, verified.Code, verified.Body.String())
+		}
+		started := request("/api/accounts/oauth", `{"provider":"`+kind+`","name":"Synthetic authorization"}`)
+		if started.Code != http.StatusCreated {
+			t.Fatalf("%s subscription authorization: %d %s", kind, started.Code, started.Body.String())
+		}
 	}
 	for _, check := range []struct {
 		workspace int64

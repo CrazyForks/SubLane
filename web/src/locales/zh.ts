@@ -70,7 +70,7 @@ export const zh: Record<keyof typeof en, string> = {
 
   activationTitle: '完成第一次调用',
   activationAccount: '接入订阅账号',
-  activationAccountHint: '先在当前工作空间接入并启用一个 Codex 订阅账号。',
+  activationAccountHint: '先在当前工作空间接入并启用一个订阅账号。',
   activationVerify: '验证账号连接',
   activationVerifyHint: '打开订阅账号，验证连接后再将它加入账号池。',
   activationPool: '将账号加入已启用的账号池',
@@ -904,7 +904,8 @@ export const zh: Record<keyof typeof en, string> = {
   viewAccounts: '查看账号',
   accountsTitle: '订阅账号',
   accountEmptyTitle: '还没有订阅账号',
-  accountEmptyDescription: '通过浏览器授权或凭据 JSON 文件接入 Codex 账号。',
+  accountEmptyDescription:
+    '通过浏览器授权或凭据 JSON 文件接入 Codex、Claude 或 Antigravity 账号。',
   providerDisabled: '该服务商暂时停用。',
   backToOverview: '返回概览',
   appearance: '外观',

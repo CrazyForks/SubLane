@@ -25,8 +25,8 @@ SubLane brings AI subscriptions into one gateway with isolated workspaces for di
 
 ## Features
 
-- **Codex subscriptions:** Connect through browser OAuth or credential JSON import, with encrypted credentials, connection checks, model discovery and quota snapshots. Claude and Antigravity account access is temporarily disabled; existing records are retained.
-- **Client APIs:** OpenAI Responses, Chat Completions and Responses compaction, plus [Claude Messages and Gemini generation formats](https://sublane.dev/docs/protocols). Requests use HTTP/SSE, with WebSocket support for Responses. The Claude and Gemini formats do not enable those subscription providers.
+- **Subscription accounts:** Connect Codex, Claude and Antigravity through browser OAuth or credential JSON import, with encrypted credentials, connection checks and model discovery. Quota snapshots are currently available for Codex.
+- **Client APIs:** OpenAI Responses, Chat Completions and Responses compaction, plus [Claude Messages and Gemini generation formats](https://sublane.dev/docs/protocols). Requests use HTTP/SSE, with WebSocket support for Responses. Client formats are independent of the selected subscription provider.
 - **Workspaces and members:** Isolated accounts, pools, keys, usage and audit records; workspace roles, invitation registration and direct member access grants.
 - **Account pools:** Model allowlists, model-aware account selection, conversation affinity, concurrency controls, cooldown recovery and Codex quota-aware routing.
 - **Network proxies:** Fixed outbound proxy per account, bulk proxy import and manual exit checks.

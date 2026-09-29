@@ -78,7 +78,7 @@ export const en = {
   activationTitle: 'Complete your first request',
   activationAccount: 'Connect a subscription account',
   activationAccountHint:
-    'Connect and enable a Codex subscription account in this workspace.',
+    'Connect and enable a subscription account in this workspace.',
   activationVerify: 'Verify the account connection',
   activationVerifyHint:
     'Open the account and verify its connection before adding it to a pool.',
@@ -1010,7 +1010,7 @@ export const en = {
   accountsTitle: 'Subscription accounts',
   accountEmptyTitle: 'No subscription accounts',
   accountEmptyDescription:
-    'Connect a Codex account using browser authorization or a credential JSON file.',
+    'Connect a Codex, Claude, or Antigravity account using browser authorization or a credential JSON file.',
   providerDisabled: 'This provider is temporarily disabled.',
   backToOverview: 'Back to overview',
   appearance: 'Appearance',

@@ -11,7 +11,6 @@ import {
   type Account,
   type Provider,
   providers,
-  enabledProviders,
   providerLabels,
   callbackURLs,
 } from '@/lib/accounts'
@@ -250,17 +249,7 @@ export function ConnectAccount({
                   variant="ghost"
                   aria-label={providerLabels[id]}
                   aria-pressed={provider === id}
-                  disabled={
-                    busy ||
-                    Boolean(account) ||
-                    Boolean(begin.data) ||
-                    !enabledProviders.includes(id)
-                  }
-                  title={
-                    !enabledProviders.includes(id)
-                      ? t('providerDisabled')
-                      : undefined
-                  }
+                  disabled={busy || Boolean(account) || Boolean(begin.data)}
                   className="relative h-auto min-w-0 flex-col gap-2 rounded-lg border border-border bg-card px-2 py-3 shadow-none hover:bg-muted aria-pressed:border-foreground aria-pressed:bg-muted dark:hover:bg-muted"
                   onClick={() => {
                     if (provider === id) return

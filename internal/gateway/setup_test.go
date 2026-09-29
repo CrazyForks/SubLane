@@ -26,12 +26,40 @@ func TestSetupDistinguishesPoolFromAccountAndMemberAccess(t *testing.T) {
 	}
 	check(1, true, false, "pool")
 	check(member, false, false, "access")
-	if _, err := s.accounts.SetEnabled(ctx, ids["codex"], false); err != nil {
-		t.Fatal(err)
+	for _, id := range ids {
+		if _, err := s.accounts.SetEnabled(ctx, id, false); err != nil {
+			t.Fatal(err)
+		}
 	}
 	check(1, true, false, "account")
 	if _, err := s.SetupProgress(ctx, 99999, true, true); err == nil {
 		t.Fatal("missing membership admitted")
+	}
+}
+
+func TestSetupAcceptsPoolsWithClaudeOrAntigravity(t *testing.T) {
+	for _, provider := range []string{"claude", "antigravity"} {
+		t.Run(provider, func(t *testing.T) {
+			ctx := context.Background()
+			s, ids := providerGateway(t, transportFunc(func(*http.Request) (*http.Response, error) {
+				t.Fatal("setup must not call upstream")
+				return nil, nil
+			}))
+			for kind, id := range ids {
+				if kind != provider {
+					if _, err := s.accounts.SetEnabled(ctx, id, false); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			if _, err := groups.New(s.db).Save(ctx, 1, groups.Input{Name: "Synthetic pool", Enabled: true, AccountIDs: []string{ids[provider]}}); err != nil {
+				t.Fatal(err)
+			}
+			ready, err := s.SetupProgress(ctx, 1, true, false)
+			if err != nil || ready.Stage != "key" {
+				t.Fatalf("verified %s pool was not ready: %+v %v", provider, ready, err)
+			}
+		})
 	}
 }
 

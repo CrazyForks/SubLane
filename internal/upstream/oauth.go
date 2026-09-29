@@ -97,11 +97,8 @@ func (c *Client) providerTokens(ctx context.Context, provider, code, state, veri
 		return accounts.Credential{}, ErrUpstream
 	}
 	defer response.Body.Close()
-	if response.StatusCode == 400 || response.StatusCode == 401 {
-		return accounts.Credential{}, accounts.ErrReauthorize
-	}
 	if response.StatusCode != 200 {
-		return accounts.Credential{}, ErrUpstream
+		return accounts.Credential{}, tokenFailure(response)
 	}
 	body, err := readBounded(response.Body, 128<<10)
 	if err != nil {

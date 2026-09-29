@@ -10,11 +10,19 @@ import (
 )
 
 func tokenFailure(response *http.Response) error {
+	var raw []byte
 	if response.StatusCode == http.StatusBadRequest || response.StatusCode == http.StatusUnauthorized {
-		raw, err := readBounded(response.Body, 128<<10)
+		var err error
+		raw, err = readBounded(response.Body, 128<<10)
 		if err != nil {
 			return ErrUpstream
 		}
+	}
+	return tokenResponseFailure(response.StatusCode, response.Header, raw)
+}
+
+func tokenResponseFailure(status int, headers http.Header, raw []byte) error {
+	if status == http.StatusBadRequest || status == http.StatusUnauthorized {
 		var value struct {
 			Error json.RawMessage `json:"error"`
 		}
@@ -36,9 +44,9 @@ func tokenFailure(response *http.Response) error {
 			}
 		}
 	}
-	if response.StatusCode == http.StatusTooManyRequests || response.StatusCode >= 500 {
+	if status == http.StatusTooManyRequests || status >= 500 {
 		var seconds int64
-		value := response.Header.Get("Retry-After")
+		value := headers.Get("Retry-After")
 		if n, err := strconv.ParseInt(value, 10, 64); err == nil {
 			seconds = n
 		} else if until, err := http.ParseTime(value); err == nil {

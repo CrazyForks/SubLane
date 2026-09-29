@@ -32,13 +32,13 @@ UPDATE alert_states SET delivery_failed=1 WHERE tenant_id=sqlc.arg(tenant_id) AN
 
 -- name: ListAlertSignals :many
 SELECT 'account_reauthorization' AS kind,a.id AS subject FROM accounts a
-WHERE a.tenant_id=sqlc.arg(tenant_id) AND a.enabled=1 AND a.provider='codex' AND a.status='reauth_required'
+WHERE a.tenant_id=sqlc.arg(tenant_id) AND a.enabled=1 AND a.provider IN ('codex','claude','antigravity') AND a.status='reauth_required'
 UNION ALL
 SELECT 'pool_unavailable',CAST(g.id AS TEXT) FROM account_groups g
 WHERE g.tenant_id=sqlc.arg(tenant_id) AND g.enabled=1 AND NOT EXISTS(
  SELECT 1 FROM group_accounts ga JOIN accounts a ON a.id=ga.account_id
  LEFT JOIN account_runtime r ON r.account_id=a.id
- WHERE ga.group_id=g.id AND a.enabled=1 AND a.provider='codex' AND a.status='ready'
+ WHERE ga.group_id=g.id AND a.enabled=1 AND a.provider IN ('codex','claude','antigravity') AND a.status='ready'
  AND COALESCE(r.cooldown_until,0)=0
 )
 UNION ALL

@@ -3,7 +3,6 @@ import { ApiError, request } from './request'
 
 export const providers = ['codex', 'claude', 'antigravity'] as const
 export type Provider = (typeof providers)[number]
-export const enabledProviders: readonly Provider[] = ['codex']
 export const providerLabels: Record<Provider, string> = {
   codex: 'Codex',
   claude: 'Claude',

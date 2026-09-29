@@ -56,6 +56,16 @@ func (s *Service) prepare(ctx context.Context, id, rejectedToken string, refresh
 	if err != nil {
 		return Credential{}, err
 	}
+	credential, changed, err := prepareClaudeIdentity(credential, "")
+	if err != nil {
+		return Credential{}, err
+	}
+	// Legacy credentials must acquire a durable device before any provider IO.
+	if changed {
+		if err := s.persist(ctx, s.queries, id, credential, row.Status); err != nil {
+			return Credential{}, err
+		}
+	}
 	// A late 401 must not reject a token another request has already rotated.
 	if credential.AccessToken == rejectedToken && !credential.Rejected {
 		credential.Rejected = true
@@ -89,6 +99,7 @@ func (s *Service) prepare(ctx context.Context, id, rejectedToken string, refresh
 		return Credential{}, ErrRefresh
 	}
 	// Refresh and administrator writes share this owner. Publish rotated credentials only after persistence.
+	deviceID := claudeDeviceID(credential.Metadata)
 	updated, err := refresh(ctx, credential)
 	if ctx.Err() != nil {
 		return Credential{}, ctx.Err()
@@ -105,6 +116,11 @@ func (s *Service) prepare(ctx context.Context, id, rejectedToken string, refresh
 			return Credential{}, err
 		}
 		return s.refreshFallback(credential, s.deferRefresh(id, err, true))
+	}
+	updated, _, err = prepareClaudeIdentity(updated, deviceID)
+	if err != nil {
+		s.deferRefresh(id, err, false)
+		return Credential{}, err
 	}
 	if err := validateRefresh(credential, updated, s.now().Add(minimumValidity).Unix()); err != nil {
 		s.deferRefresh(id, err, false)

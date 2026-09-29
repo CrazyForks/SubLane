@@ -96,7 +96,6 @@ func (r *tenantRegistry) acquire(id int64) *tenantRuntime {
 		r.enrollmentLimiter = server.NewLoginLimiter()
 	}
 	accountService := accounts.NewForTenant(r.db, r.vault, id)
-	accountService.RestrictToCodex()
 	forwarding := gateway.NewForTenant(r.ctx, r.db, accountService, r.provider, id, r.pricing)
 	forwarding.SetTimeZone(r.timeZone)
 	dataDir := ""

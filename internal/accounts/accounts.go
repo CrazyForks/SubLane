@@ -146,6 +146,16 @@ func (s *Service) save(ctx context.Context, name string, credential Credential, 
 		if proxyID != "" && (row.ProxyID == nil || *row.ProxyID != proxyID) {
 			return Account{}, ErrProxyInput
 		}
+		if credential.Kind() == "claude" {
+			previous, err := s.decrypt(row)
+			if err != nil {
+				return Account{}, err
+			}
+			credential, _, err = prepareClaudeIdentity(credential, claudeDeviceID(previous.Metadata))
+			if err != nil {
+				return Account{}, err
+			}
+		}
 		tx, err := s.db.BeginTx(ctx, nil)
 		if err != nil {
 			return Account{}, err
@@ -167,6 +177,10 @@ func (s *Service) save(ctx context.Context, name string, credential Credential, 
 		delete(s.refreshes, replaceID)
 		row.Email, row.Plan, row.Status, row.ExpiresAt, row.UpdatedAt = credential.Email, credential.Plan, status, credential.ExpiresAt, now
 		return metadata(row), nil
+	}
+	credential, _, err = prepareClaudeIdentity(credential, "")
+	if err != nil {
+		return Account{}, err
 	}
 	random := make([]byte, 16)
 	_, _ = rand.Read(random)
