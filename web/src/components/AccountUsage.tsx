@@ -12,8 +12,17 @@ import { cn } from '@/lib/cn'
 import { Button } from './ui/Button'
 import { useTimeZone } from '@/lib/timezone'
 import { ApiError } from '@/lib/request'
+import type { Provider } from '@/lib/accounts'
 
-export function AccountUsage({ id, name }: { id: string; name: string }) {
+export function AccountUsage({
+  id,
+  name,
+  provider,
+}: {
+  id: string
+  name: string
+  provider: Provider
+}) {
   const { t, i18n } = useTranslation()
   const timeZone = useTimeZone()
   const client = useQueryClient()
@@ -23,6 +32,18 @@ export function AccountUsage({ id, name }: { id: string; name: string }) {
     onSuccess: (data) => client.setQueryData(usageOptions(id).queryKey, data),
   })
   const [now, setNow] = useState(() => Date.now())
+  const [expanded, setExpanded] = useState(false)
+  const limits = query.data?.limits ?? []
+  const modelQuotas = provider === 'antigravity'
+  // Surface constrained models before folding the rest; ordering never combines distinct quotas.
+  const ordered = modelQuotas
+    ? [...limits].sort(
+        (a, b) =>
+          (b.windows[0]?.used_percent ?? -1) -
+          (a.windows[0]?.used_percent ?? -1),
+      )
+    : limits
+  const visible = modelQuotas && !expanded ? ordered.slice(0, 3) : ordered
   const cooldown = Math.max(
     0,
     (query.data?.retry_after_seconds ?? 0) -
@@ -65,7 +86,7 @@ export function AccountUsage({ id, name }: { id: string; name: string }) {
         <h3 className="text-xs font-medium text-muted-foreground">
           {t('accountUsage')}
         </h3>
-        {query.data && (
+        {query.data && provider === 'codex' && (
           <p className="text-xs tabular-nums text-muted-foreground">
             {t('usageResetCredits', {
               count:
@@ -93,15 +114,18 @@ export function AccountUsage({ id, name }: { id: string; name: string }) {
         </p>
       ) : null}
       {query.data && (
-        <div className="space-y-4">
+        <div
+          id={`usage-limits-${id}`}
+          className={modelQuotas ? 'space-y-3' : 'space-y-4'}
+        >
           {query.data.limits.length === 0 && (
             <p className="text-xs text-muted-foreground">
               {t('usageNotReported')}
             </p>
           )}
-          {query.data.limits.map((limit, index) => (
+          {visible.map((limit, index) => (
             <div key={index} className="space-y-3">
-              {limit.name && (
+              {limit.name && !modelQuotas && (
                 <p className="break-words text-xs font-medium">{limit.name}</p>
               )}
               {(limit.allowed === false || limit.limit_reached === true) && (
@@ -118,11 +142,26 @@ export function AccountUsage({ id, name }: { id: string; name: string }) {
                     key={window.kind}
                     window={window}
                     now={snapshotNow}
+                    name={modelQuotas ? limit.name : undefined}
                   />
                 ))}
               </div>
             </div>
           ))}
+          {modelQuotas && limits.length > 3 && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-auto px-0 py-1 text-xs text-muted-foreground [@media(pointer:coarse)]:min-h-11"
+              aria-expanded={expanded}
+              aria-controls={`usage-limits-${id}`}
+              onClick={() => setExpanded((value) => !value)}
+            >
+              {t(expanded ? 'usageModelsCollapse' : 'usageModelsExpand', {
+                count: limits.length,
+              })}
+            </Button>
+          )}
         </div>
       )}
       <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
@@ -171,21 +210,36 @@ export function AccountUsage({ id, name }: { id: string; name: string }) {
   )
 }
 
-function QuotaWindow({ window, now }: { window: UsageWindow; now: number }) {
+function QuotaWindow({
+  window,
+  now,
+  name,
+}: {
+  window: UsageWindow
+  now: number
+  name?: string
+}) {
   const { t, i18n } = useTranslation()
   const timeZone = useTimeZone()
   const locale = i18n.resolvedLanguage ?? 'en'
   const seconds = window.window_seconds
   const label =
-    seconds === null
-      ? t(window.kind === 'primary' ? 'usagePrimary' : 'usageSecondary')
+    name ??
+    (seconds === null
+      ? t(
+          window.kind === 'model'
+            ? 'usageModel'
+            : window.kind === 'primary'
+              ? 'usagePrimary'
+              : 'usageSecondary',
+        )
       : seconds % 86400 === 0
         ? t('usageDays', { count: seconds / 86400 })
         : seconds % 3600 === 0
           ? t('usageHours', { count: seconds / 3600 })
           : seconds % 60 === 0
             ? t('usageMinutes', { count: seconds / 60 })
-            : t('usageSeconds', { count: seconds })
+            : t('usageSeconds', { count: seconds }))
   const remaining =
     window.used_percent === null
       ? null
@@ -230,9 +284,17 @@ function QuotaWindow({ window, now }: { window: UsageWindow; now: number }) {
             : t('usageResetMinutes', { minutes })
   return (
     <div className="space-y-1.5 text-xs">
-      <div className="flex flex-wrap justify-between gap-x-3 gap-y-1">
-        <span className="text-muted-foreground">{label}</span>
-        <span className={cn('tabular-nums', tone)}>{percentage}</span>
+      <div className="flex items-center justify-between gap-3">
+        <span
+          title={name}
+          className={cn(
+            'min-w-0 truncate',
+            name ? 'font-medium' : 'text-muted-foreground',
+          )}
+        >
+          {label}
+        </span>
+        <span className={cn('shrink-0 tabular-nums', tone)}>{percentage}</span>
       </div>
       {remaining !== null && (
         <div

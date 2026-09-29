@@ -49,11 +49,17 @@ type usageWindow struct {
 
 func (c *Client) Usage(ctx context.Context, credential accounts.Credential) (Usage, error) {
 	ctx = credentialContext(ctx, credential)
-	if credential.Kind() != "codex" {
-		return Usage{}, ErrUsageUnsupported
-	}
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
+	switch credential.Kind() {
+	case "claude":
+		return c.claudeUsage(ctx, credential)
+	case "antigravity":
+		return c.antigravityUsage(ctx, credential)
+	case "codex":
+	default:
+		return Usage{}, ErrUsageUnsupported
+	}
 	// Match the ChatGPT backend path used by openai/codex's backend-client, independent of model forwarding.
 	request, err := http.NewRequestWithContext(ctx, "GET", "https://chatgpt.com/backend-api/wham/usage", nil)
 	if err != nil {

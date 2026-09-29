@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -24,6 +25,7 @@ type quotaFixture struct {
 	accounts          *accounts.Service
 	connection        *sql.DB
 	path, keyPath, id string
+	provider          string
 	calls             atomic.Int32
 	fail              atomic.Bool
 	clock             atomic.Int64
@@ -32,8 +34,12 @@ type quotaFixture struct {
 }
 
 func newQuotaFixture(t *testing.T) *quotaFixture {
+	return newProviderQuotaFixture(t, "codex")
+}
+
+func newProviderQuotaFixture(t *testing.T, provider string) *quotaFixture {
 	t.Helper()
-	f := &quotaFixture{path: filepath.Join(t.TempDir(), "quota.db"), keyPath: filepath.Join(t.TempDir(), "key")}
+	f := &quotaFixture{path: filepath.Join(t.TempDir(), "quota.db"), keyPath: filepath.Join(t.TempDir(), "key"), provider: provider}
 	f.clock.Store(time.Now().Unix())
 	f.open(t)
 	identity, err := auth.New(f.connection)
@@ -43,7 +49,7 @@ func newQuotaFixture(t *testing.T) *quotaFixture {
 	if _, err := identity.Setup(context.Background(), "synthetic-admin", "synthetic-password", "Synthetic workspace"); err != nil {
 		t.Fatal(err)
 	}
-	row, err := f.accounts.Authorize(context.Background(), "Synthetic subscription", accounts.Credential{AccessToken: "synthetic-access", RefreshToken: "synthetic-refresh", AccountID: "synthetic-account", ExpiresAt: time.Now().Add(24 * time.Hour).Unix()}, "")
+	row, err := f.accounts.Authorize(context.Background(), "Synthetic subscription", accounts.Credential{Provider: provider, AccessToken: "synthetic-access", RefreshToken: "synthetic-refresh", AccountID: "synthetic-account", ExpiresAt: time.Now().Add(24 * time.Hour).Unix(), Metadata: map[string]json.RawMessage{"project_id": json.RawMessage(`"synthetic-project"`)}}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,10 +91,47 @@ func (f *quotaFixture) open(t *testing.T) {
 		if f.fail.Load() {
 			return &http.Response{StatusCode: 503, Body: io.NopCloser(strings.NewReader(`{"private":"synthetic-secret"}`))}, nil
 		}
-		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"rate_limit":{"primary_window":{"used_percent":25,"limit_window_seconds":18000,"reset_at":2000000000}}}`))}, nil
+		body := `{"rate_limit":{"primary_window":{"used_percent":25,"limit_window_seconds":18000,"reset_at":2000000000}}}`
+		if f.provider == "claude" {
+			body = `{"five_hour":{"utilization":25,"resets_at":"2030-01-01T00:00:00Z"},"seven_day":null}`
+		} else if f.provider == "antigravity" {
+			body = `{"models":{"synthetic-model":{"quotaInfo":{"remainingFraction":0.75,"resetTime":"2030-01-01T00:00:00Z"}}}}`
+		}
+		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}, nil
 	}))
 	f.service = New(context.Background(), f.connection, f.accounts, client)
 	f.service.usage.now = func() time.Time { return time.Unix(f.clock.Load(), 0) }
+}
+
+func TestSubscriptionUsageCachePersistsAndRetainsFailedRefresh(t *testing.T) {
+	for _, provider := range []string{"claude", "antigravity"} {
+		t.Run(provider, func(t *testing.T) {
+			f := newProviderQuotaFixture(t, provider)
+			first := waitQuota(t, f)
+			if first.Stale || len(first.Limits) != 1 || first.Limits[0].Windows[0].UsedPercent == nil || *first.Limits[0].Windows[0].UsedPercent != 25 {
+				t.Fatal("provider usage did not reach the shared cache")
+			}
+			f.service.Close()
+			f.connection.Close()
+			f.open(t)
+			next, err := f.service.Usage(context.Background(), f.id)
+			if err != nil || next.UpdatedAt != first.UpdatedAt || f.calls.Load() != 1 {
+				t.Fatalf("provider snapshot did not survive restart: %v", err)
+			}
+			f.clock.Add(121)
+			f.fail.Store(true)
+			failed := waitQuota(t, f)
+			if !failed.Stale || !failed.RefreshFailed || failed.UpdatedAt != first.UpdatedAt || *failed.Limits[0].Windows[0].UsedPercent != 25 {
+				t.Fatal("failed quota read discarded the previous observation")
+			}
+			if _, err := f.accounts.SetEnabled(context.Background(), f.id, false); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := f.service.Usage(context.Background(), f.id); !errors.Is(err, accounts.ErrDisabled) {
+				t.Fatal("disabled provider account served cached usage")
+			}
+		})
+	}
 }
 func waitQuota(t *testing.T, f *quotaFixture) UsageSnapshot {
 	t.Helper()

@@ -91,8 +91,11 @@ func (s *Service) usageAccount(ctx context.Context, id string) error {
 	if account.Status == "reauth_required" {
 		return accounts.ErrReauthorize
 	}
-	if account.Provider != "codex" {
+	if !accounts.ValidProvider(account.Provider) {
 		return upstream.ErrUsageUnsupported
+	}
+	if !s.accounts.ProviderEnabled(account.Provider) {
+		return accounts.ErrProviderDisabled
 	}
 	return nil
 }

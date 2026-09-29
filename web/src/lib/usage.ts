@@ -3,7 +3,7 @@ import { z } from 'zod'
 import { ApiError, request } from './request'
 
 const windowSchema = z.object({
-  kind: z.enum(['primary', 'secondary']),
+  kind: z.enum(['primary', 'secondary', 'model']),
   used_percent: z.number().nonnegative().nullable(),
   window_seconds: z.number().int().positive().nullable(),
   reset_at: z.number().int().nonnegative().nullable(),
@@ -25,7 +25,7 @@ const usageSchema = z.object({
         windows: z.array(windowSchema).max(2),
       }),
     )
-    .max(33),
+    .max(128),
   updated_at: z.number().int().positive(),
   server_time: z.number().int().positive(),
   expires_at: z.number().int().positive(),

@@ -1057,6 +1057,9 @@ export const en = {
   usageLimited: 'Currently limited',
   usagePrimary: 'Primary limit',
   usageSecondary: 'Secondary limit',
+  usageModel: 'Model quota',
+  usageModelsExpand: 'Show all {{count}} models',
+  usageModelsCollapse: 'Show fewer models',
   usageDays: '{{count}}-day limit',
   usageHours: '{{count}}-hour limit',
   usageMinutes: '{{count}}-minute limit',
@@ -1075,8 +1078,6 @@ export const en = {
   serviceProvider: 'Service provider',
   providerImportDescription:
     'Import credential JSON exported by CLIProxyAPI for the selected provider. Credentials are encrypted on this instance.',
-  providerQuotaUnsupported:
-    'Quota reporting is not available for this provider yet.',
   accountGroups: 'Account pools',
   groupsAssignmentHint:
     'New accounts start unassigned. Add them to a pool and grant member access.',

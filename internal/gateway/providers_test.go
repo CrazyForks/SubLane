@@ -49,6 +49,9 @@ func TestCodexOnlyPolicyExcludesStoredProvidersAndCatalogs(t *testing.T) {
 	if _, err := s.AccountCatalog(ctx, ids["claude"], false); !errors.Is(err, accounts.ErrProviderDisabled) {
 		t.Fatal("inactive catalog refreshed", err)
 	}
+	if _, err := s.Usage(ctx, ids["claude"]); !errors.Is(err, accounts.ErrProviderDisabled) {
+		t.Fatal("inactive quota reader accepted", err)
+	}
 	group, err := s.GroupCatalog(ctx, 1, 1, false)
 	if err != nil || len(group.Models) != 1 || group.KnownAccounts != 1 {
 		t.Fatal("inactive model published", group, err)
@@ -172,10 +175,9 @@ func TestModelCatalogKeepsHealthyProvidersWithNativeIDs(t *testing.T) {
 	}
 }
 
-func TestUnsupportedQuotaDoesNotVerifyOrPublishSnapshot(t *testing.T) {
+func TestFailedSubscriptionQuotaDoesNotVerifyOrPublishSnapshot(t *testing.T) {
 	gateway, ids := providerGateway(t, transportFunc(func(*http.Request) (*http.Response, error) {
-		t.Error("unsupported quota made a network call")
-		return nil, errors.New("synthetic")
+		return &http.Response{StatusCode: 503, Body: io.NopCloser(strings.NewReader(`{"error":"synthetic-failure"}`))}, nil
 	}))
 	ctx := context.Background()
 	for _, kind := range []string{"claude", "antigravity"} {
@@ -185,11 +187,11 @@ func TestUnsupportedQuotaDoesNotVerifyOrPublishSnapshot(t *testing.T) {
 		}
 		snapshot, err := gateway.Usage(ctx, ids[kind])
 		if err == nil || snapshot.UpdatedAt != 0 {
-			t.Fatal("unsupported quota published a successful observation", kind, err)
+			t.Fatal("failed quota read published a successful observation", kind, err)
 		}
 		row, err := gateway.accounts.Get(ctx, ids[kind])
 		if err != nil || row.Status != "unverified" {
-			t.Fatal("unsupported quota verified account", err)
+			t.Fatal("failed quota read verified account", err)
 		}
 	}
 }

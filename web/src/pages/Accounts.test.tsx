@@ -401,13 +401,42 @@ it.each([
 )
 
 it.each(['claude', 'antigravity'] as const)(
-  'lets a ready %s account verify and reauthorize without reporting fake quota',
+  'lets a ready %s account read usage, verify and reauthorize',
   async (provider) => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockImplementation((url: string) => {
         if (url === '/api/auth/state')
           return Promise.resolve(response(authenticated))
+        if (url === '/api/accounts/synthetic-account/usage') {
+          const now = Math.floor(Date.now() / 1000)
+          return Promise.resolve(
+            response({
+              limits: [
+                {
+                  name: provider === 'claude' ? '' : 'synthetic-model',
+                  allowed: null,
+                  limit_reached: null,
+                  windows: [
+                    {
+                      kind: provider === 'claude' ? 'primary' : 'model',
+                      used_percent: 25,
+                      window_seconds: provider === 'claude' ? 18000 : null,
+                      reset_at: null,
+                    },
+                  ],
+                },
+              ],
+              updated_at: now,
+              server_time: now,
+              expires_at: now + 120,
+              stale: false,
+              refreshing: false,
+              refresh_failed: false,
+              retry_after_seconds: 0,
+            }),
+          )
+        }
         return Promise.resolve(
           response({ accounts: [{ ...account, provider, status: 'ready' }] }),
         )
@@ -424,11 +453,8 @@ it.each(['claude', 'antigravity'] as const)(
         }) as HTMLButtonElement
       ).disabled,
     ).toBe(false)
-    expect(
-      within(card).getByText(
-        'Quota reporting is not available for this provider yet.',
-      ),
-    ).toBeTruthy()
+    expect(await within(card).findByText('75% remaining')).toBeTruthy()
+    expect(within(card).queryByText(/Reset cards:/)).toBeNull()
     const user = userEvent.setup()
     await user.click(
       within(card).getByRole('button', {

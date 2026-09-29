@@ -320,10 +320,12 @@ export function Accounts() {
                 </div>
                 <div className="grid gap-5 border-t border-border px-5 py-4 @2xl:grid-cols-[minmax(0,1fr)_minmax(14rem,0.65fr)]">
                   <div className="min-w-0">
-                    {account.enabled &&
-                    account.status !== 'reauth_required' &&
-                    account.provider === 'codex' ? (
-                      <AccountUsage id={account.id} name={account.name} />
+                    {account.enabled && account.status !== 'reauth_required' ? (
+                      <AccountUsage
+                        id={account.id}
+                        name={account.name}
+                        provider={account.provider}
+                      />
                     ) : (
                       <div className="space-y-2">
                         <h3 className="text-xs font-medium text-muted-foreground">
@@ -332,9 +334,7 @@ export function Accounts() {
                         <p className="text-sm leading-5 text-muted-foreground">
                           {t(
                             account.enabled
-                              ? account.status === 'reauth_required'
-                                ? 'accountReauthorizeHint'
-                                : 'providerQuotaUnsupported'
+                              ? 'accountReauthorizeHint'
                               : 'accountDisabledHint',
                           )}
                         </p>

@@ -951,6 +951,9 @@ export const zh: Record<keyof typeof en, string> = {
   usageLimited: '当前使用受限',
   usagePrimary: '主要额度',
   usageSecondary: '次要额度',
+  usageModel: '模型额度',
+  usageModelsExpand: '查看全部 {{count}} 个模型',
+  usageModelsCollapse: '收起模型列表',
   usageDays: '{{count}} 天额度',
   usageHours: '{{count}} 小时额度',
   usageMinutes: '{{count}} 分钟额度',
@@ -969,7 +972,6 @@ export const zh: Record<keyof typeof en, string> = {
   serviceProvider: '服务商',
   providerImportDescription:
     '导入所选服务商的 CLIProxyAPI 凭据 JSON，凭据会加密保存在当前实例。',
-  providerQuotaUnsupported: '暂未支持该服务商的额度查询。',
   accountGroups: '账号池',
   groupsAssignmentHint: '新账号默认未分配；加入账号池并授权成员后即可使用。',
   accountUnassigned: '未分配',

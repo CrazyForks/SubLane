@@ -3,6 +3,7 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { expect, it, vi } from 'vitest'
 import { AccountUsage } from './AccountUsage'
+import type { Provider } from '@/lib/accounts'
 
 const now = Math.floor(Date.now() / 1000)
 const metadata = {
@@ -39,17 +40,114 @@ const snapshot = {
     },
   ],
 }
-function mount() {
+function mount(provider: Provider = 'codex') {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
   render(
     <QueryClientProvider client={client}>
-      <AccountUsage id="synthetic-account" name="Test subscription" />
+      <AccountUsage
+        id="synthetic-account"
+        name="Test subscription"
+        provider={provider}
+      />
     </QueryClientProvider>,
   )
   return client
 }
+it.each(['claude', 'antigravity'] as const)(
+  'shows %s usage without Codex reset cards',
+  async (provider) => {
+    const limits =
+      provider === 'claude'
+        ? snapshot.limits
+        : [
+            {
+              name: 'synthetic-model',
+              allowed: null,
+              limit_reached: null,
+              windows: [
+                {
+                  kind: 'model',
+                  used_percent: 25,
+                  window_seconds: null,
+                  reset_at: now + 7200,
+                },
+              ],
+            },
+            {
+              name: 'synthetic-unknown',
+              allowed: null,
+              limit_reached: null,
+              windows: [
+                {
+                  kind: 'model',
+                  used_percent: null,
+                  window_seconds: null,
+                  reset_at: null,
+                },
+              ],
+            },
+          ]
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValue(
+          new Response(JSON.stringify({ ...snapshot, limits })),
+        ),
+    )
+    mount(provider)
+    await screen.findByText('75% remaining')
+    expect(screen.queryByText(/Reset cards:/)).toBeNull()
+    if (provider === 'antigravity') {
+      expect(screen.getByText('synthetic-model')).toBeTruthy()
+      expect(
+        screen.getByRole('progressbar', { name: 'synthetic-model' }),
+      ).toBeTruthy()
+      expect(screen.getByText('Usage unavailable')).toBeTruthy()
+      expect(screen.queryByText('100% remaining')).toBeNull()
+    }
+  },
+)
+
+it('keeps many model quotas compact and makes constrained models visible before expansion', async () => {
+  const limits = Array.from({ length: 8 }, (_, index) => ({
+    name: `synthetic-model-${index}`,
+    allowed: null,
+    limit_reached: null,
+    windows: [
+      {
+        kind: 'model',
+        used_percent: index === 7 ? 100 : index * 10,
+        window_seconds: null,
+        reset_at: now + 7200,
+      },
+    ],
+  }))
+  vi.stubGlobal(
+    'fetch',
+    vi
+      .fn()
+      .mockResolvedValue(new Response(JSON.stringify({ ...snapshot, limits }))),
+  )
+  mount('antigravity')
+  await screen.findByText('0% remaining')
+  expect(screen.getAllByRole('progressbar')).toHaveLength(3)
+  expect(
+    screen.getByRole('progressbar', { name: 'synthetic-model-7' }),
+  ).toBeTruthy()
+  const user = userEvent.setup()
+  const expand = screen.getByRole('button', { name: 'Show all 8 models' })
+  expect(expand.getAttribute('aria-expanded')).toBe('false')
+  await user.click(expand)
+  expect(screen.getAllByRole('progressbar')).toHaveLength(8)
+  const collapse = screen.getByRole('button', { name: 'Show fewer models' })
+  expect(collapse.getAttribute('aria-expanded')).toBe('true')
+  await user.click(collapse)
+  expect(screen.getAllByRole('progressbar')).toHaveLength(3)
+})
+
 it('loads actual quota windows and refreshes without confusing failure with exhaustion', async () => {
   const fetch = vi
     .fn()
