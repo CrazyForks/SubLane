@@ -2,6 +2,23 @@
 
 All notable changes are documented here in [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
+## [0.3.0] - 2026-09-29
+
+### Added
+
+- Add terminal selection menus (#58)
+- Enable Claude and Antigravity subscriptions (#59)
+- Add shared model price catalog (#62)
+- Support Grok subscriptions and quota (#63)
+- Add lightweight request diagnostics (#65)
+
+### Changed
+
+- Add Air live reload (#64)
+
+### Fixed
+
+- Report Claude and Antigravity subscription quotas (#61)
 ## [0.2.0] - 2026-09-29
 
 ### Added
@@ -149,6 +166,7 @@ All notable changes are documented here in [Keep a Changelog](https://keepachang
 - Distinguish remaining quota with status colors
 - Restore version-gated model discovery
 
+[0.3.0]: https://github.com/murongg/SubLane/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/murongg/SubLane/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/murongg/SubLane/compare/v0.1.0-rc.9...v0.1.0
 [0.1.0-rc.9]: https://github.com/murongg/SubLane/compare/v0.1.0-rc.8...v0.1.0-rc.9
