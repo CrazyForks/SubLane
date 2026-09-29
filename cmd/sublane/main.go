@@ -17,6 +17,7 @@ import (
 	"github.com/murongg/SubLane/internal/apikey"
 	"github.com/murongg/SubLane/internal/auth"
 	"github.com/murongg/SubLane/internal/config"
+	"github.com/murongg/SubLane/internal/demo"
 	"github.com/murongg/SubLane/internal/gateway"
 	"github.com/murongg/SubLane/internal/pricing"
 	"github.com/murongg/SubLane/internal/server"
@@ -73,6 +74,15 @@ func run() error {
 	slog.SetDefault(logger)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	if cfg.Demo {
+		instance, err := demo.New(ctx, demo.Options{Assets: web.Assets(), Version: version, PublicURL: cfg.PublicURL, TrustedProxies: cfg.TrustedProxies})
+		if err != nil {
+			return fmt.Errorf("start demo: %w", err)
+		}
+		defer instance.Close()
+		logger.Info("Demo mode enabled: disposable sample data, read-only, no live gateway")
+		return serve(ctx, logger, cfg.Addr, instance.Handler)
+	}
 	db, err := storage.Open(ctx, filepath.Join(cfg.DataDir, "sublane.db"))
 	if err != nil {
 		return err
@@ -140,9 +150,13 @@ func run() error {
 		gateway.MaintainHistory(maintenanceCtx, db)
 	}()
 	defer func() { stopMaintenance(); <-maintenanceDone }()
+	return serve(ctx, logger, cfg.Addr, server.NewMulti(db, authentication, tenancy, cfg.PublicURL, registry.Handler))
+}
+
+func serve(ctx context.Context, logger *slog.Logger, addr string, handler http.Handler) error {
 	srv := &http.Server{
-		Addr:              cfg.Addr,
-		Handler:           server.NewMulti(db, authentication, tenancy, cfg.PublicURL, registry.Handler),
+		Addr:              addr,
+		Handler:           handler,
 		BaseContext:       func(net.Listener) context.Context { return ctx },
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       30 * time.Second,
@@ -151,7 +165,7 @@ func run() error {
 	}
 	failed := make(chan error, 1)
 	go func() { failed <- srv.ListenAndServe() }()
-	logger.Info("SubLane starting", "address", cfg.Addr, "version", version)
+	logger.Info("SubLane starting", "address", addr, "version", version)
 	select {
 	case err := <-failed:
 		if !errors.Is(err, http.ErrServerClosed) {

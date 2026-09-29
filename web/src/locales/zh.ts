@@ -1,6 +1,12 @@
 import type { en } from './en'
 
 export const zh: Record<keyof typeof en, string> = {
+  demoTitle: '只读演示',
+  demoDescription:
+    '浏览示例账号、账号池与用量。修改、凭据操作和真实 API 调用已禁用，演示重启后数据重置。',
+  demoCredentials: '用户名：{{username}} · 密码：{{password}}',
+  demoExplore: '进入演示',
+  demoReadOnly: '演示模式不支持修改，你可以继续浏览和筛选示例数据。',
   workspaceChooseTitle: '选择工作空间',
   workspaceChooseDescription: '请选择一个可用的工作空间继续。',
   workspaceNoneActive: '你目前没有可访问的工作空间。',

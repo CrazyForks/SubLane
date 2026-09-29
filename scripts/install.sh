@@ -13,7 +13,7 @@ Install SubLane from a published Docker image or Linux binary.
 Usage: bash install.sh [--version VERSION] [--dir DIRECTORY] [--port PORT]
                        [--runtime docker|binary] [--proxy none|caddy|nginx]
                        [--domain DOMAIN] [--trusted-proxies CIDRS]
-                       [--wait-timeout SECONDS] [--non-interactive]
+                       [--wait-timeout SECONDS] [--demo] [--non-interactive]
 
   --version VERSION  Published version, with or without v (default: latest stable,
                      or newest published prerelease when no stable release exists)
@@ -24,17 +24,19 @@ Usage: bash install.sh [--version VERSION] [--dir DIRECTORY] [--port PORT]
   --domain DOMAIN    Public HTTPS domain; without one, proxy listens on local HTTP
   --trusted-proxies CIDRS  Proxy source CIDRs as seen by SubLane, comma-separated
   --wait-timeout SECONDS  Startup readiness timeout (default: 90)
+  --demo             Install a read-only demo with disposable sample data
   --non-interactive  Use defaults for omitted choices, even with a terminal
   --help             Show this help
 
-An interactive terminal guides the choices. Without one, defaults are Docker
-and no proxy; pass flags to choose otherwise. Proxy files are generated for
-review but are never installed into Caddy or Nginx automatically.
+An interactive terminal guides the choices. Without one, defaults are a normal
+instance, Docker and no proxy; pass flags to choose otherwise. Proxy files are
+generated for review but are never installed into Caddy or Nginx automatically.
 
 Requires Bash, curl, and sha256sum or shasum. Docker mode needs Compose;
 binary mode needs Linux and a working systemd user manager.
 Automatic version selection also requires jq.
 Existing directories are never overwritten. Use the deployment guide for upgrades.
+Demo mode requires a compatible release and uses the public login demo / sublane-demo.
 HELP
 }
 
@@ -49,6 +51,7 @@ compose() {
   SUBLANE_IMAGE="$install_image" SUBLANE_BIND_ADDRESS=127.0.0.1 \
     SUBLANE_PORT="$install_port" SUBLANE_PUBLIC_URL="$install_public_url" \
     SUBLANE_TRUSTED_PROXIES="$install_trusted_proxies" SUBLANE_LOG_LEVEL=info \
+    SUBLANE_DEMO="$install_demo" \
     docker compose --project-name "$install_project" --project-directory "$directory" \
     --env-file "$directory/.env" -f "$directory/docker.compose.yaml" "$@" </dev/null
 }
@@ -82,6 +85,14 @@ verify_download() {
   [[ $expected =~ ^[0-9a-f]{64}$ ]] || fail "Release checksums must contain exactly one $name entry."
   actual=$("${install_hash[@]}" "$install_stage/$name")
   [[ ${actual%% *} == "$expected" ]] || fail "$name checksum mismatch; installation stopped."
+}
+
+require_demo_support() {
+  [[ $install_demo == true ]] || return 0
+  # Verified release configuration declares this capability; old releases would silently ignore the flag.
+  if ! awk '/^[[:space:]]*SUBLANE_DEMO[:=]/ { supported=1 } END { exit !supported }' "$1" 2>/dev/null; then
+    fail "v$install_version does not support demo mode. Choose a compatible release with --version."
+  fi
 }
 
 download() {
@@ -244,6 +255,7 @@ SUBLANE_PORT=$install_port
 SUBLANE_PUBLIC_URL=$install_public_url
 SUBLANE_TRUSTED_PROXIES=$install_trusted_proxies
 SUBLANE_LOG_LEVEL=info
+SUBLANE_DEMO=$install_demo
 SUBLANE_MAX_REQUEST_BODY_MB=128
 ENV
 }
@@ -255,6 +267,7 @@ write_binary_files() {
     printf 'SUBLANE_PUBLIC_URL=%q\n' "$install_public_url"
     printf 'SUBLANE_TRUSTED_PROXIES=%q\n' "$install_trusted_proxies"
     printf 'SUBLANE_LOG_LEVEL=info\n'
+    printf 'SUBLANE_DEMO=%s\n' "$install_demo"
     printf 'SUBLANE_MAX_REQUEST_BODY_MB=128\n'
   } > "$install_stage/sublane.env"
   cat > "$install_stage/start.sh" <<'RUN'
@@ -287,6 +300,11 @@ UNIT
 show_configuration() {
   printf '\nInstallation plan: %s v%s in %s\n' "$install_runtime" "$install_version" "$install_dir"
   printf 'Proxy: %s; local port: %s\n' "$install_proxy" "$install_port"
+  if [[ $install_demo == true ]]; then
+    printf 'Mode: read-only demo. Sample data resets on restart; live API calls are disabled.\n'
+  else
+    printf 'Mode: normal instance.\n'
+  fi
   if [[ $install_runtime == docker ]]; then cat "$install_stage/.env"
   else cat "$install_stage/sublane.env" "$install_stage/$install_unit"
   fi
@@ -365,6 +383,7 @@ main() {
   install_port=8080
   install_wait_timeout=90
   install_runtime=''
+  install_demo=''
   install_proxy=''
   install_domain=''
   install_trusted_proxies=''
@@ -387,6 +406,7 @@ main() {
         shift 2
         ;;
       --non-interactive) install_no_prompt=true; shift ;;
+      --demo) install_demo=true; shift ;;
       --help|-h) usage; return ;;
       *) fail "Unknown argument: $1. Use --help." ;;
     esac
@@ -404,6 +424,18 @@ main() {
   fi
   install_runtime=${install_runtime:-docker}
   [[ $install_runtime == docker || $install_runtime == binary ]] || fail 'Use --runtime docker or binary.'
+
+  if [[ -z $install_demo ]] && prompt_available; then
+    local choice
+    choice=$(prompt_choice 'Instance mode [1 normal, 2 read-only demo] (default 1): ')
+    case "$choice" in
+      ''|1) install_demo=false ;;
+      2) install_demo=true ;;
+      *) fail 'Choose a normal instance (1) or read-only demo (2).' ;;
+    esac
+    install_prompted=true
+  fi
+  install_demo=${install_demo:-false}
 
   if [[ -z $install_proxy ]] && prompt_available; then
     local choice
@@ -507,6 +539,7 @@ main() {
   download SHA256SUMS
   verify_download "$install_artifact"
   if [[ $install_runtime == docker ]]; then
+    require_demo_support "$install_stage/docker.compose.yaml"
     write_docker_env
   else
     mkdir "$install_stage/unpacked"
@@ -520,6 +553,7 @@ main() {
     tar -xzf "$install_stage/$install_artifact" -C "$install_stage/unpacked" || fail 'Could not extract binary archive.'
     [[ -f $install_stage/unpacked/sublane && ! -L $install_stage/unpacked/sublane && -x $install_stage/unpacked/sublane ]] \
       || fail 'Binary archive is missing the executable.'
+    require_demo_support "$install_stage/unpacked/.env.example"
     install_unit="$install_project.service"
     write_binary_files
   fi
@@ -528,7 +562,11 @@ main() {
   if [[ $install_runtime == docker ]]; then install_docker; else install_binary; fi
   printf '\nInstallation complete: %s\n' "$install_dir"
   if [[ $install_proxy == none ]]; then
-    printf 'Open http://127.0.0.1:%s to create the administrator.\n' "$install_port"
+    if [[ $install_demo == true ]]; then
+      printf 'Open http://127.0.0.1:%s and choose Explore demo.\n' "$install_port"
+    else
+      printf 'Open http://127.0.0.1:%s to create the administrator.\n' "$install_port"
+    fi
   else
     local proxy_file=${install_proxy/caddy/Caddyfile}
     [[ $install_proxy != nginx ]] || proxy_file=nginx.conf
@@ -540,6 +578,9 @@ main() {
     if [[ $install_runtime == docker && -z $install_trusted_proxies ]]; then
       printf 'Set SUBLANE_TRUSTED_PROXIES to the proxy peer address seen inside the container before public access.\n'
     fi
+  fi
+  if [[ $install_demo == true ]]; then
+    printf 'Demo login: demo / sublane-demo. This instance is read-only and resets sample data on restart.\n'
   fi
 }
 

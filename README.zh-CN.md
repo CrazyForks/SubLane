@@ -62,6 +62,8 @@ make dev
 
 ## 文档
 
+想先体验界面，可运行 `SUBLANE_DEMO=true make dev`，在登录页点击「进入演示」。演示服务使用独立临时数据，仅供浏览；二进制和 Compose 启动方式见[演示模式](https://sublane.dev/docs/zh/deployment#演示模式)。
+
 从[分步入门教程](https://sublane.dev/docs/zh/guide/installation)开始。使用文档统一维护在[文档仓库](https://github.com/murongg/sublane-website)。
 
 - [部署与升级](https://sublane.dev/docs/zh/deployment) · [备份恢复](https://sublane.dev/docs/zh/backup)

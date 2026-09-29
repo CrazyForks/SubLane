@@ -107,6 +107,7 @@ export async function downloadBackup(
 }
 export function backupErrorKey(error: Error) {
   if (error instanceof ApiError) {
+    if (error.code === 'demo_read_only') return 'demoReadOnly'
     if (error.code === 'invalid_backup') return 'backupInvalid'
     if (error.code === 'backup_too_large') return 'backupTooLarge'
     if (error.code === 'backup_destination_exists')

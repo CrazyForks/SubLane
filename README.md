@@ -62,6 +62,8 @@ Open http://127.0.0.1:5173. Run `make check` to test and build the project.
 
 ## Documentation
 
+To preview the interface with sample data, run `SUBLANE_DEMO=true make dev`, then choose **Explore demo** on the login page. This starts a disposable, read-only server demo; see [demo mode](https://sublane.dev/docs/deployment#demo-mode) for binary and Compose usage.
+
 Follow the [step-by-step tutorial](https://sublane.dev/docs/guide/installation). Guides are maintained in the [documentation repository](https://github.com/murongg/sublane-website).
 
 - [Deployment](https://sublane.dev/docs/deployment) · [Backup and restore](https://sublane.dev/docs/backup)

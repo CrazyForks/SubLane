@@ -5,6 +5,24 @@ import (
 	"testing"
 )
 
+func TestDemoOptIn(t *testing.T) {
+	for _, value := range []string{"", "false", "true", "invalid"} {
+		cfg, err := Load(func(k string) string {
+			if k == "SUBLANE_DEMO" {
+				return value
+			}
+			return ""
+		})
+		if value == "invalid" {
+			if err == nil {
+				t.Fatal("invalid demo setting accepted")
+			}
+		} else if err != nil || cfg.Demo != (value == "true") {
+			t.Fatalf("demo %q: %+v %v", value, cfg, err)
+		}
+	}
+}
+
 func TestTrustedProxyCIDRs(t *testing.T) {
 	cfg, err := Load(func(k string) string {
 		if k == "SUBLANE_TRUSTED_PROXIES" {

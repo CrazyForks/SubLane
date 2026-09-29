@@ -1,4 +1,11 @@
 export const en = {
+  demoTitle: 'Read-only demo',
+  demoDescription:
+    'Explore sample accounts, pools, and usage. Changes, credential actions, and live API calls are disabled. Data resets when the demo restarts.',
+  demoCredentials: 'Username: {{username}} · Password: {{password}}',
+  demoExplore: 'Explore demo',
+  demoReadOnly:
+    'Changes are unavailable in this demo. You can still browse and filter the sample data.',
   workspaceChooseTitle: 'Choose a workspace',
   workspaceChooseDescription: 'Select an active workspace to continue.',
   workspaceNoneActive: 'You do not have access to an active workspace.',
