@@ -11,12 +11,24 @@ export function createQueryClient() {
         initialized: true,
         time_zone: 'UTC',
         user: null,
+        demo: client.getQueryData<AuthState>(authKey)?.demo,
       })
     }
   }
   const client: QueryClient = new QueryClient({
     queryCache: new QueryCache({ onError }),
-    mutationCache: new MutationCache({ onError }),
+    mutationCache: new MutationCache({
+      onError,
+      onMutate: (_variables, mutation) => {
+        // Demo forms remain inspectable; only login/logout may send mutations.
+        // The server independently enforces this for direct API requests.
+        if (
+          client.getQueryData<AuthState>(authKey)?.demo &&
+          !mutation.options.meta?.demoAllowed
+        )
+          throw new ApiError('demo_read_only', 403)
+      },
+    }),
     defaultOptions: {
       queries: {
         staleTime: 15_000,

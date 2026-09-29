@@ -80,6 +80,7 @@ export function pruneFailedProxies() {
 }
 
 const errors = {
+  demo_read_only: 'demoReadOnly',
   invalid_proxy_input: 'proxyInvalidInput',
   proxy_not_found: 'proxyNotFound',
   proxy_in_use: 'proxyInUse',

@@ -13,6 +13,7 @@ import (
 )
 
 type Config struct {
+	Demo            bool
 	Addr            string
 	DataDir         string
 	LogLevel        slog.Level
@@ -29,6 +30,12 @@ type Config struct {
 
 func Load(getenv func(string) string) (Config, error) {
 	c := Config{Addr: "127.0.0.1:8080", DataDir: "./data", LogLevel: slog.LevelInfo, MaxRequestBody: 128 << 20, PricingInterval: 6 * time.Hour}
+	if v := getenv("SUBLANE_DEMO"); v != "" {
+		if v != "true" && v != "false" {
+			return c, fmt.Errorf("SUBLANE_DEMO must be true or false")
+		}
+		c.Demo = v == "true"
+	}
 	if v := getenv("SUBLANE_ADDR"); v != "" {
 		c.Addr = v
 	}

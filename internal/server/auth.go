@@ -21,7 +21,14 @@ import (
 
 const sessionCookie = "sublane_session"
 
+// DemoCredentials describes public, synthetic credentials in an isolated demo instance.
+type DemoCredentials struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
+
 type authHTTP struct {
+	demo              *DemoCredentials
 	audit             *audit.Service
 	service           *auth.Service
 	tenants           *tenants.Service
@@ -178,8 +185,9 @@ func (h *authHTTP) writeState(w http.ResponseWriter, status int, state auth.Stat
 	}
 	writeJSON(w, status, struct {
 		auth.State
-		TimeZone string `json:"time_zone"`
-	}{State: state, TimeZone: name})
+		TimeZone string           `json:"time_zone"`
+		Demo     *DemoCredentials `json:"demo,omitempty"`
+	}{State: state, TimeZone: name, Demo: h.demo})
 }
 
 func (h *authHTTP) stateForTenant(ctx context.Context, sessionToken string) (auth.State, error) {

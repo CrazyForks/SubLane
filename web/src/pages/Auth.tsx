@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { useNavigate } from '@tanstack/react-router'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { ArrowLeft, LoaderCircle } from 'lucide-react'
-import { authKey, setup, signIn } from '@/lib/auth'
+import { authKey, authOptions, setup, signIn } from '@/lib/auth'
 import { ApiError } from '@/lib/request'
 import { replaceAuthState } from '@/lib/query'
 import { validateCredentials, type CredentialError } from '@/lib/credentials'
@@ -25,6 +25,8 @@ export function Auth({ mode }: { mode: 'setup' | 'login' }) {
   const [setupStep, setSetupStep] = useState<'account' | 'workspace'>('account')
   const { t } = useTranslation()
   const client = useQueryClient()
+  const { data: state } = useQuery(authOptions())
+  const demo = !creating ? state?.demo : undefined
   const navigate = useNavigate()
   const heading = useRef<HTMLHeadingElement>(null)
   const [fieldError, setFieldError] = useState<CredentialError | null>(null)
@@ -32,6 +34,7 @@ export function Auth({ mode }: { mode: 'setup' | 'login' }) {
     if (creating) heading.current?.focus()
   }, [creating, setupStep])
   const mutation = useMutation({
+    meta: { demoAllowed: !creating },
     // Drop submitted credentials when the authentication form is no longer observed.
     gcTime: 0,
     mutationFn: (input: {
@@ -185,6 +188,24 @@ export function Auth({ mode }: { mode: 'setup' | 'login' }) {
             : 'signInTitle',
         )}
       </h1>
+      {demo && (
+        <div className="mt-5 space-y-3 rounded-lg border border-border bg-muted/50 p-4">
+          <p className="text-sm font-medium">{t('demoTitle')}</p>
+          <p className="text-sm leading-6 text-muted-foreground">
+            {t('demoDescription')}
+          </p>
+          <p className="break-words text-sm">{t('demoCredentials', demo)}</p>
+          <Button
+            type="button"
+            variant="outline"
+            className="w-full"
+            disabled={mutation.isPending}
+            onClick={() => mutation.mutate(demo)}
+          >
+            {t('demoExplore')}
+          </Button>
+        </div>
+      )}
       {creating && (
         <p className="mb-7 mt-2 text-sm leading-6 text-muted-foreground">
           {t(

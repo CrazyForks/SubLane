@@ -132,6 +132,7 @@ export function checkAccount(id: string) {
 }
 
 const messages = {
+  demo_read_only: 'demoReadOnly',
   allocation_pool_locked: 'allocationAccountLocked',
   invalid_account_input: 'accountInvalidInput',
   account_exists: 'accountExists',

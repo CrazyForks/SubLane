@@ -26,6 +26,7 @@ export function Session() {
   const username = data?.user?.username ?? ''
   const initials = username.slice(0, 2).toUpperCase()
   const logout = useMutation({
+    meta: { demoAllowed: true },
     mutationFn: signOut,
     onSuccess: (state) => replaceAuthState(client, state),
   })

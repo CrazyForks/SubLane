@@ -108,6 +108,7 @@ export function availableGroupOptions(client: QueryClient, userID: number) {
 }
 export function groupErrorKey(error: Error) {
   if (error instanceof ApiError) {
+    if (error.code === 'demo_read_only') return 'demoReadOnly'
     if (error.code === 'allocation_pool_locked') return 'allocationPoolConflict'
     if (error.code === 'group_exists') return 'groupNameTaken'
     if (error.code === 'group_limit') return 'groupLimitReached'

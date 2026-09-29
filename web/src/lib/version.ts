@@ -52,6 +52,7 @@ export function syncVersion(signal: AbortSignal) {
 }
 export function versionErrorKey(error: Error) {
   if (error instanceof ApiError) {
+    if (error.code === 'demo_read_only') return 'demoReadOnly'
     if (error.code === 'invalid_codex_version') return 'codexVersionInvalid'
     if (error.code === 'codex_version_sync_cooldown')
       return 'codexVersionCooldown'

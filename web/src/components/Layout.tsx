@@ -1,6 +1,7 @@
 import { useId, useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link, Outlet, useRouterState } from '@tanstack/react-router'
+import { DemoNotice } from './DemoNotice'
 import {
   Activity,
   FolderClosed,
@@ -254,6 +255,7 @@ export function Layout({ children }: { children?: ReactNode }) {
             </Button>
           </div>
         </header>
+        <DemoNotice />
         <main
           id="main-content"
           className="mx-auto w-full max-w-6xl px-5 py-6 md:px-6"

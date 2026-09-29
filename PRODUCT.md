@@ -28,6 +28,8 @@ English is the default interface language. Support English and Simplified Chines
 
 The project uses the GNU Affero General Public License v3.0 (AGPL-3.0-only). Retain third-party license and attribution notices separately.
 
+An opt-in server demo (`SUBLANE_DEMO=true`) uses a fresh temporary database, public demo credentials, synthetic accounts and usage, and an offline provider transport. It reuses normal authentication and management views, blocks all mutations except login/logout and all gateway transports, and cleans up its temporary data on graceful shutdown. The normal data directory and pricing files are not opened. Demo login and authenticated views explicitly label the data as illustrative; production instances continue to use real data only.
+
 ## Brand Commitments
 
 The name is SubLane. Black, white, and neutral grays form the primary palette. Success, warning, error, and information states may use semantic colors. Preserve the previously agreed palette and Shadcn Admin components; keep the interface minimal and restrained.

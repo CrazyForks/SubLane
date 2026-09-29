@@ -26,6 +26,7 @@ import (
 )
 
 type Options struct {
+	Demo              *DemoCredentials
 	DataDir           string
 	Assets            fs.FS
 	Version           string
@@ -68,7 +69,7 @@ func New(o Options) http.Handler {
 	if enrollmentLimiter == nil {
 		enrollmentLimiter = NewLoginLimiter()
 	}
-	login := &authHTTP{audit: o.Audit, service: o.Auth, tenants: o.Tenants, timeZone: o.TimeZone, tenantID: tenantID, publicURL: o.PublicURL, limiter: loginLimiter, enrollmentLimiter: enrollmentLimiter, trustedProxies: o.TrustedProxies}
+	login := &authHTTP{demo: o.Demo, audit: o.Audit, service: o.Auth, tenants: o.Tenants, timeZone: o.TimeZone, tenantID: tenantID, publicURL: o.PublicURL, limiter: loginLimiter, enrollmentLimiter: enrollmentLimiter, trustedProxies: o.TrustedProxies}
 	keys := &keyHTTP{groups: o.Groups, service: o.Keys, gateway: o.Gateway, publicURL: o.PublicURL, sockets: make(chan struct{}, 8)}
 	accountManagement := &accountHTTP{service: o.Accounts, oauth: o.OAuth, gateway: o.Gateway}
 	memberManagement := &memberHTTP{gateway: o.Gateway}

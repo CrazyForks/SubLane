@@ -45,6 +45,8 @@ export function usageReasonKey(error: unknown) {
         ? error.code
         : ''
   switch (code) {
+    case 'demo_read_only':
+      return 'demoReadOnly'
     case 'rate_limited':
     case 'upstream_rate_limited':
       return 'usageReasonRateLimited'

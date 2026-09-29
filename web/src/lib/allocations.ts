@@ -184,6 +184,7 @@ export function allocationValue(n: number, mode: AllocationMode) {
 }
 export function allocationErrorKey(error: Error) {
   if (error instanceof ApiError) {
+    if (error.code === 'demo_read_only') return 'demoReadOnly'
     if (
       error.code === 'allocation_pool_conflict' ||
       error.code === 'allocation_pool_locked'
