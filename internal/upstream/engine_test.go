@@ -12,7 +12,7 @@ func TestEngineBootstrapsExecutorsWithoutCredentialMirror(t *testing.T) {
 	if err := client.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	for _, provider := range []string{"codex", "claude", "antigravity"} {
+	for _, provider := range []string{"codex", "claude", "antigravity", "xai"} {
 		if _, err := client.executor(provider); err != nil {
 			t.Fatal(provider, err)
 		}
@@ -23,7 +23,7 @@ func TestEngineBootstrapsExecutorsWithoutCredentialMirror(t *testing.T) {
 }
 
 func TestExecutionAuthCannotRefreshOutsideDurableOwner(t *testing.T) {
-	for _, provider := range []string{"codex", "claude", "antigravity"} {
+	for _, provider := range []string{"codex", "claude", "antigravity", "xai"} {
 		auth := sdkAuth(accounts.Credential{Provider: provider, AccountID: "synthetic-account", AccessToken: "synthetic-access", RefreshToken: "synthetic-refresh"})
 		if auth.Metadata["refresh_token"] != nil {
 			t.Fatal("executor received a refresh token outside the durable owner", provider)

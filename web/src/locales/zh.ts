@@ -663,6 +663,10 @@ export const zh: Record<keyof typeof en, string> = {
   callbackHint:
     '登录后，localhost 页面可能无法打开。请复制浏览器地址栏中的完整地址，粘贴到这里。',
   completeAuthorization: '完成授权',
+  deviceAuthorizationInstructions:
+    '打开 Grok 授权页面并确认设备码。批准后，此窗口将自动完成账号接入。',
+  deviceCode: '设备码',
+  deviceAuthorizationWaiting: '等待在浏览器中批准授权…',
   authorizationInstructions:
     '打开服务商授权页，登录后将完整回调地址粘贴回此处。',
   startAgain: '重新开始',
@@ -926,7 +930,7 @@ export const zh: Record<keyof typeof en, string> = {
   accountsTitle: '订阅账号',
   accountEmptyTitle: '还没有订阅账号',
   accountEmptyDescription:
-    '通过浏览器授权或凭据 JSON 文件接入 Codex、Claude 或 Antigravity 账号。',
+    '通过浏览器授权或凭据 JSON 文件接入 Codex、Claude、Antigravity 或 Grok 账号。',
   providerDisabled: '该服务商暂时停用。',
   backToOverview: '返回概览',
   appearance: '外观',

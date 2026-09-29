@@ -94,6 +94,8 @@ func (f *quotaFixture) open(t *testing.T) {
 		body := `{"rate_limit":{"primary_window":{"used_percent":25,"limit_window_seconds":18000,"reset_at":2000000000}}}`
 		if f.provider == "claude" {
 			body = `{"five_hour":{"utilization":25,"resets_at":"2030-01-01T00:00:00Z"},"seven_day":null}`
+		} else if f.provider == "xai" {
+			body = `{"config":{"creditUsagePercent":25,"currentPeriod":{"type":"USAGE_PERIOD_TYPE_WEEKLY","end":"2030-01-01T00:00:00Z"}}}`
 		} else if f.provider == "antigravity" {
 			body = `{"models":{"synthetic-model":{"quotaInfo":{"remainingFraction":0.75,"resetTime":"2030-01-01T00:00:00Z"}}}}`
 		}
@@ -104,7 +106,7 @@ func (f *quotaFixture) open(t *testing.T) {
 }
 
 func TestSubscriptionUsageCachePersistsAndRetainsFailedRefresh(t *testing.T) {
-	for _, provider := range []string{"claude", "antigravity"} {
+	for _, provider := range []string{"claude", "antigravity", "xai"} {
 		t.Run(provider, func(t *testing.T) {
 			f := newProviderQuotaFixture(t, provider)
 			first := waitQuota(t, f)

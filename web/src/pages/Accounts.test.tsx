@@ -373,7 +373,7 @@ it.each([
     const user = userEvent.setup()
     await user.click(screen.getByRole('button', { name: 'Add account' }))
     const choices = screen.getByRole('group', { name: 'Service provider' })
-    expect(within(choices).getAllByRole('button')).toHaveLength(3)
+    expect(within(choices).getAllByRole('button')).toHaveLength(4)
     for (const button of within(choices).getAllByRole('button')) {
       expect((button as HTMLButtonElement).disabled).toBe(false)
     }
@@ -698,4 +698,160 @@ it('identifies an unassigned account and offers pool setup', async () => {
       .getByRole('link', { name: 'Assign to an account pool' })
       .getAttribute('href'),
   ).toBe('/groups')
+})
+
+it('connects Grok using a device code without asking for a callback URL', async () => {
+  let connected = false
+  const grok = { ...account, provider: 'xai', name: 'Synthetic Grok' }
+  vi.stubGlobal(
+    'fetch',
+    vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+      if (url === '/api/auth/state')
+        return Promise.resolve(response(authenticated))
+      if (url === '/api/proxies')
+        return Promise.resolve(response({ proxies: [] }))
+      if (url === '/api/accounts/oauth') {
+        expect(JSON.parse(String(init?.body)).provider).toBe('xai')
+        return Promise.resolve(
+          response(
+            {
+              url: 'https://accounts.x.ai/oauth2/device?user_code=MOCK-CODE',
+              state: 'synthetic-device-state',
+              user_code: 'MOCK-CODE',
+              interval: 5,
+              expires_at: 9999999999,
+            },
+            201,
+          ),
+        )
+      }
+      if (url === '/api/accounts/oauth/poll') {
+        expect(JSON.parse(String(init?.body))).toEqual({
+          state: 'synthetic-device-state',
+        })
+        connected = true
+        return Promise.resolve(response({ account: grok, interval: 0 }))
+      }
+      return Promise.resolve(response({ accounts: connected ? [grok] : [] }))
+    }),
+  )
+  const user = userEvent.setup()
+  open()
+  await screen.findByText('No subscription accounts')
+  await user.click(screen.getByRole('button', { name: 'Add account' }))
+  const dialog = await screen.findByRole('dialog')
+  await user.click(within(dialog).getByRole('button', { name: 'Grok' }))
+  await user.type(
+    within(dialog).getByLabelText('Account name'),
+    'Synthetic Grok',
+  )
+  await user.click(
+    within(dialog).getByRole('button', { name: 'Start authorization' }),
+  )
+  await screen.findByText('Synthetic Grok')
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  expect(screen.queryByLabelText('Callback URL')).toBeNull()
+})
+
+it('shows the Grok device code while waiting and cancels the attempt on close', async () => {
+  const fetcher = vi.fn().mockImplementation((url: string) => {
+    if (url === '/api/auth/state')
+      return Promise.resolve(response(authenticated))
+    if (url === '/api/proxies')
+      return Promise.resolve(response({ proxies: [] }))
+    if (url === '/api/accounts/oauth')
+      return Promise.resolve(
+        response(
+          {
+            url: 'https://accounts.x.ai/oauth2/device?user_code=MOCK-CODE',
+            state: 'synthetic-device-state',
+            user_code: 'MOCK-CODE',
+            interval: 5,
+            expires_at: 9999999999,
+          },
+          201,
+        ),
+      )
+    if (url === '/api/accounts/oauth/poll')
+      return Promise.resolve(response({ interval: 5 }))
+    if (url === '/api/accounts/oauth/synthetic-device-state')
+      return Promise.resolve(new Response(null, { status: 204 }))
+    return Promise.resolve(response({ accounts: [] }))
+  })
+  vi.stubGlobal('fetch', fetcher)
+  const user = userEvent.setup()
+  open()
+  await screen.findByText('No subscription accounts')
+  await user.click(screen.getByRole('button', { name: 'Add account' }))
+  const dialog = await screen.findByRole('dialog')
+  await user.click(within(dialog).getByRole('button', { name: 'Grok' }))
+  await user.type(
+    within(dialog).getByLabelText('Account name'),
+    'Synthetic Grok',
+  )
+  await user.click(
+    within(dialog).getByRole('button', { name: 'Start authorization' }),
+  )
+  await screen.findByText('MOCK-CODE')
+  expect(screen.queryByLabelText('Callback URL')).toBeNull()
+  await user.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+  await waitFor(() =>
+    expect(
+      fetcher.mock.calls.some(
+        ([url, init]) =>
+          url === '/api/accounts/oauth/synthetic-device-state' &&
+          init.method === 'DELETE',
+      ),
+    ).toBe(true),
+  )
+})
+
+it('loads and displays the Grok subscription allowance on its account card', async () => {
+  const now = Math.floor(Date.now() / 1000)
+  const fetcher = vi.fn().mockImplementation((url: string) => {
+    if (url === '/api/auth/state')
+      return Promise.resolve(response(authenticated))
+    if (url === '/api/accounts')
+      return Promise.resolve(
+        response({
+          accounts: [{ ...account, provider: 'xai', name: 'Synthetic Grok' }],
+        }),
+      )
+    if (url === '/api/accounts/synthetic-account/usage')
+      return Promise.resolve(
+        response({
+          limits: [
+            {
+              name: '',
+              allowed: null,
+              limit_reached: null,
+              windows: [
+                {
+                  kind: 'primary',
+                  used_percent: 37.5,
+                  window_seconds: 604800,
+                  reset_at: now + 86400,
+                },
+              ],
+            },
+          ],
+          reset_credits: null,
+          updated_at: now,
+          server_time: now,
+          expires_at: now + 120,
+          stale: false,
+          refreshing: false,
+          refresh_failed: false,
+          retry_after_seconds: 0,
+        }),
+      )
+    return Promise.resolve(
+      response({ accounts: [], server_time: now, proxies: [] }),
+    )
+  })
+  vi.stubGlobal('fetch', fetcher)
+  open()
+  await screen.findByText('Synthetic Grok')
+  await screen.findByText('62.5% remaining')
+  expect(screen.getByText('7-day limit')).toBeTruthy()
 })

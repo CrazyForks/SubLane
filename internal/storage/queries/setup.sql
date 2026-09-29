@@ -7,7 +7,7 @@ AND m.enabled=1 AND u.enabled=1 AND t.status='active';
 -- name: GetSetupAccounts :one
 SELECT CAST(COUNT(*) AS INTEGER) AS enabled,
 CAST(COALESCE(SUM(CASE WHEN status='ready' THEN 1 ELSE 0 END),0) AS INTEGER) AS verified
-FROM accounts WHERE tenant_id=sqlc.arg(tenant_id) AND enabled=1 AND provider IN ('codex','claude','antigravity');
+FROM accounts WHERE tenant_id=sqlc.arg(tenant_id) AND enabled=1 AND provider IN ('codex','claude','antigravity','xai');
 
 -- name: RecordFirstRequest :exec
 UPDATE memberships SET first_request_at=sqlc.arg(started_at)

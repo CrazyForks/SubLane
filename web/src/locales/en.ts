@@ -731,6 +731,10 @@ export const en = {
   callbackHint:
     'After signing in, the localhost page may not load. Copy its complete address from the browser address bar and paste it here.',
   completeAuthorization: 'Complete authorization',
+  deviceAuthorizationInstructions:
+    'Open the Grok authorization page and approve the device code. This window will connect your account automatically.',
+  deviceCode: 'Device code',
+  deviceAuthorizationWaiting: 'Waiting for approval in your browser…',
   authorizationInstructions:
     'Open the provider authorization page, sign in, then return here with the complete callback URL.',
   startAgain: 'Start again',
@@ -1033,7 +1037,7 @@ export const en = {
   accountsTitle: 'Subscription accounts',
   accountEmptyTitle: 'No subscription accounts',
   accountEmptyDescription:
-    'Connect a Codex, Claude, or Antigravity account using browser authorization or a credential JSON file.',
+    'Connect a Codex, Claude, Antigravity, or Grok account using browser authorization or a credential JSON file.',
   providerDisabled: 'This provider is temporarily disabled.',
   backToOverview: 'Back to overview',
   appearance: 'Appearance',

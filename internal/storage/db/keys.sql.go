@@ -158,7 +158,7 @@ JOIN group_accounts ga ON ga.group_id=g.id
 JOIN accounts a ON a.id=ga.account_id
 WHERE k.user_id=?1 AND g.tenant_id=?2
 AND k.revoked_at IS NULL AND k.enabled=1 AND (k.expires_at IS NULL OR k.expires_at>?3)
-AND u.enabled=1 AND g.enabled=1 AND a.enabled=1 AND a.provider IN ('codex','claude','antigravity') AND a.status='ready'
+AND u.enabled=1 AND g.enabled=1 AND a.enabled=1 AND a.provider IN ('codex','claude','antigravity','xai') AND a.status='ready'
 AND EXISTS(SELECT 1 FROM effective_group_access access WHERE access.group_id=g.id AND access.user_id=u.id)
 ORDER BY k.id DESC LIMIT 20
 `

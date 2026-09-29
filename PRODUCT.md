@@ -16,7 +16,7 @@ Platform operators, workspace owners, workspace administrators, and members. One
 
 ## Product Purpose
 
-Build a minimal subscription gateway that can host several isolated workspaces in one Go process and SQLite database. Keep a single-workspace self-hosted installation simple while supporting a hosted multi-tenant deployment. Codex, Claude and Antigravity subscription providers are enabled. Official API key upstreams remain later work.
+Build a minimal subscription gateway that can host several isolated workspaces in one Go process and SQLite database. Keep a single-workspace self-hosted installation simple while supporting a hosted multi-tenant deployment. Codex, Claude, Antigravity and Grok Build subscription providers are enabled. Official API key upstreams remain later work.
 
 ## Capabilities and Constraints
 
@@ -50,3 +50,5 @@ The name is SubLane. Black, white, and neutral grays form the primary palette. S
 - Complete real connection workflows before broadening the feature set.
 - Separate upstream credentials from member gateway keys.
 - Validate resource budgets with measurements rather than presenting targets as guarantees.
+
+Grok Build uses the pinned SDK's xAI executor through the subscription chat proxy. Administrators can authorize a Grok account using a session-bound device-code flow or import a CLIProxyAPI `type: "xai"` OAuth JSON export. Device polling is bounded, paced, cancellable and single-use. SubLane owns encrypted credentials and token refresh; execution auth explicitly selects OAuth and never contains refresh tokens or imported endpoint overrides. Model discovery reads the account's xAI catalog. Grok quota reporting reads the official CLI subscription billing endpoint, preserving unknown usage, weekly/monthly reset windows and the shared persisted cache. Included legacy credits may supply a percentage when the modern period is absent; on-demand spending, prepaid balances and product breakdowns are never treated as subscription allowance. Quota-based account admission remains Codex-only. Grok media endpoints are not implemented. Synthetic tests cover credential persistence, device authorization, refresh, model discovery, HTTP/SSE and Responses WebSocket routing; real subscription and desktop-client acceptance remain unverified.

@@ -1,14 +1,15 @@
 import { z } from 'zod'
 import { ApiError, request } from './request'
 
-export const providers = ['codex', 'claude', 'antigravity'] as const
+export const providers = ['codex', 'claude', 'antigravity', 'xai'] as const
 export type Provider = (typeof providers)[number]
 export const providerLabels: Record<Provider, string> = {
+  xai: 'Grok',
   codex: 'Codex',
   claude: 'Claude',
   antigravity: 'Antigravity (Gemini)',
 }
-export const callbackURLs: Record<Provider, string> = {
+export const callbackURLs: Partial<Record<Provider, string>> = {
   codex: 'http://localhost:1455/auth/callback',
   claude: 'http://localhost:54545/callback',
   antigravity: 'http://localhost:51121/oauth-callback',
@@ -37,13 +38,21 @@ const authorizationSchema = z.object({
     const url = new URL(value)
     return (
       url.protocol === 'https:' &&
-      ['auth.openai.com', 'claude.ai', 'accounts.google.com'].includes(
-        url.hostname,
-      ) &&
+      [
+        'auth.openai.com',
+        'claude.ai',
+        'accounts.google.com',
+        'auth.x.ai',
+        'accounts.x.ai',
+        'x.ai',
+        'grok.com',
+      ].includes(url.hostname) &&
       !url.username &&
       !url.password
     )
   }),
+  user_code: z.string().min(1).max(128).optional(),
+  interval: z.number().int().min(5).max(60).optional(),
   state: z.string().min(1),
   callback_url: z.url().optional(),
   expires_at: z.number().int().positive(),
@@ -157,4 +166,15 @@ export function accountErrorKey(error: unknown) {
   return Object.hasOwn(messages, code)
     ? messages[code as keyof typeof messages]
     : 'accountActionFailed'
+}
+
+export function pollAuthorization(state: string, signal: AbortSignal) {
+  return request(
+    '/api/accounts/oauth/poll',
+    z.object({
+      account: accountSchema.optional(),
+      interval: z.number().int().min(0).max(600),
+    }),
+    { method: 'POST', body: JSON.stringify({ state }), signal },
+  )
 }

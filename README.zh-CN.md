@@ -25,7 +25,7 @@ SubLane 将 AI 订阅账号整合为统一网关，并用独立工作空间隔�
 
 ## 功能
 
-- **订阅账号接入：** Codex、Claude 和 Antigravity 均支持浏览器 OAuth 授权或导入凭据 JSON，提供凭据加密、连接验证和模型发现；额度快照目前支持 Codex。
+- **订阅账号接入：** Codex、Claude、Antigravity 和 Grok Build 均支持 OAuth 授权或导入凭据 JSON，提供凭据加密、连接验证和模型发现。Grok 使用设备码授权；额度快照支持 Codex、Claude 用量窗口、Antigravity 模型额度和 Grok 订阅周期。
 - **客户端 API：** 提供 OpenAI Responses、Chat Completions、Responses 压缩，以及 [Claude Messages 和 Gemini 生成格式](https://sublane.dev/docs/zh/protocols)。支持 HTTP/SSE，Responses 另支持 WebSocket；客户端格式与所选订阅服务商独立。
 - **工作空间与成员：** 隔离订阅账号、账号池、密钥、用量和审计记录；支持工作空间角色、邀请注册和成员直接授权。
 - **账号池：** 支持模型白名单、按模型选择账号、会话绑定、并发控制、冷却恢复和 Codex 额度感知调度。

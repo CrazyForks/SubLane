@@ -129,6 +129,10 @@ func TestUsableKeyReadinessRequiresAnActiveKeyAndReadyPoolAccount(t *testing.T) 
 		t.Fatal(err)
 	}
 	check(true)
+	if _, err := connection.ExecContext(ctx, "UPDATE accounts SET provider='xai' WHERE id='synthetic-account'"); err != nil {
+		t.Fatal(err)
+	}
+	check(true)
 	if _, err := connection.ExecContext(ctx, "UPDATE accounts SET provider='claude' WHERE id='synthetic-account'"); err != nil {
 		t.Fatal(err)
 	}

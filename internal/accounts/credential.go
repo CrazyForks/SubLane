@@ -32,7 +32,7 @@ func (c Credential) Kind() string {
 }
 
 func ValidProvider(provider string) bool {
-	return provider == "codex" || provider == "claude" || provider == "antigravity"
+	return provider == "codex" || provider == "claude" || provider == "antigravity" || provider == "xai"
 }
 
 func ParseCredential(raw []byte) (Credential, error) { return ParseFor("codex", raw) }
@@ -122,8 +122,8 @@ func validToken(value string) bool {
 }
 
 type claims struct {
-	AccountID, Email, Plan string
-	Expiry                 int64
+	AccountID, Email, Plan, Subject string
+	Expiry                          int64
 }
 
 func tokenClaims(token string) claims {
@@ -136,9 +136,10 @@ func tokenClaims(token string) claims {
 		return claims{}
 	}
 	var payload struct {
-		Email  string `json:"email"`
-		Expiry int64  `json:"exp"`
-		Auth   struct {
+		Email   string `json:"email"`
+		Subject string `json:"sub"`
+		Expiry  int64  `json:"exp"`
+		Auth    struct {
 			AccountID string `json:"chatgpt_account_id"`
 			Plan      string `json:"chatgpt_plan_type"`
 		} `json:"https://api.openai.com/auth"`
@@ -146,7 +147,7 @@ func tokenClaims(token string) claims {
 	if json.Unmarshal(raw, &payload) != nil {
 		return claims{}
 	}
-	return claims{AccountID: payload.Auth.AccountID, Email: payload.Email, Plan: payload.Auth.Plan, Expiry: payload.Expiry}
+	return claims{Subject: payload.Subject, AccountID: payload.Auth.AccountID, Email: payload.Email, Plan: payload.Auth.Plan, Expiry: payload.Expiry}
 }
 
 // parseSubscription accepts the flat credential format exported by CLIProxyAPI. Only credential fields survive import.
@@ -162,8 +163,13 @@ func parseSubscription(provider string, raw []byte) (Credential, error) {
 		OpenAIKey        string `json:"OPENAI_API_KEY"`
 		AccountUUID      string `json:"account_uuid"`
 		OrganizationUUID string `json:"organization_uuid"`
+		Subject          string `json:"sub"`
+		AuthKind         string `json:"auth_kind"`
 	}
 	if json.Unmarshal(raw, &input) != nil || input.Type != "" && input.Type != provider || input.Provider != "" && input.Provider != provider || input.APIKey != "" || input.OpenAIKey != "" {
+		return Credential{}, ErrInput
+	}
+	if provider == "xai" && input.AuthKind != "" && input.AuthKind != "oauth" {
 		return Credential{}, ErrInput
 	}
 	c := input.Credential
@@ -199,6 +205,27 @@ func parseSubscription(provider string, raw []byte) (Credential, error) {
 		c.AccountID = input.AccountUUID
 		if input.OrganizationUUID != "" {
 			c.AccountID += ":" + input.OrganizationUUID
+		}
+	}
+	if provider == "xai" {
+		identity := tokenClaims(c.IDToken)
+		if identity.Subject != "" {
+			if input.Subject != "" && input.Subject != identity.Subject {
+				return Credential{}, ErrIdentity
+			}
+			input.Subject = identity.Subject
+		}
+		if identity.Email != "" {
+			c.Email = identity.Email
+		}
+		// The stable OAuth subject survives email changes and must agree with imported identity.
+		if input.Subject != "" {
+			if input.AccountID != "" && input.AccountID != input.Subject {
+				return Credential{}, ErrIdentity
+			}
+			c.AccountID = input.Subject
+		} else if input.AccountID != "" {
+			c.AccountID = input.AccountID
 		}
 	}
 	if input.Expired != "" {

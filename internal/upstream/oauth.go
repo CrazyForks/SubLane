@@ -32,7 +32,7 @@ func (c *Client) AuthorizationURLFor(provider, state, challenge string) (string,
 	if provider == "codex" {
 		return c.AuthorizationURL(state, challenge), nil
 	}
-	if !accounts.ValidProvider(provider) {
+	if !accounts.ValidProvider(provider) || provider == "xai" {
 		return "", ErrInput
 	}
 	values := url.Values{"state": {state}, "redirect_uri": {RedirectURI(provider)}, "response_type": {"code"}}
@@ -55,6 +55,12 @@ func (c *Client) ExchangeFor(ctx context.Context, provider, code, state, verifie
 	return c.providerTokens(ctx, provider, code, state, verifier, accounts.Credential{Provider: provider})
 }
 func (c *Client) providerTokens(ctx context.Context, provider, code, state, verifier string, old accounts.Credential) (accounts.Credential, error) {
+	if provider == "xai" {
+		if code != "" {
+			return accounts.Credential{}, ErrInput
+		}
+		return c.grokTokens(ctx, url.Values{"grant_type": {"refresh_token"}, "refresh_token": {old.RefreshToken}}, old)
+	}
 	if provider == "antigravity" {
 		return c.antigravityTokens(ctx, code, old)
 	}

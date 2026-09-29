@@ -56,7 +56,7 @@ WHERE g.id=sqlc.arg(group_id) AND g.enabled=1 AND u.enabled=1
 AND EXISTS(SELECT 1 FROM effective_group_access access WHERE access.group_id=g.id AND access.user_id=u.id));
 
 -- name: ListAvailableGroups :many
-SELECT g.id,g.name,(SELECT count(*) FROM group_accounts ga JOIN accounts a ON a.id=ga.account_id WHERE ga.group_id=g.id AND a.provider IN ('codex','claude','antigravity')) AS account_count
+SELECT g.id,g.name,(SELECT count(*) FROM group_accounts ga JOIN accounts a ON a.id=ga.account_id WHERE ga.group_id=g.id AND a.provider IN ('codex','claude','antigravity','xai')) AS account_count
 FROM account_groups g JOIN users u ON u.id=sqlc.arg(user_id)
 WHERE g.tenant_id=sqlc.arg(tenant_id) AND g.enabled=1 AND u.enabled=1
 AND EXISTS(SELECT 1 FROM effective_group_access access WHERE access.group_id=g.id AND access.user_id=u.id) ORDER BY g.id;
@@ -64,10 +64,10 @@ AND EXISTS(SELECT 1 FROM effective_group_access access WHERE access.group_id=g.i
 -- name: GroupConnectionStatus :one
 SELECT CASE WHEN EXISTS(
  SELECT 1 FROM group_accounts ga JOIN accounts a ON a.id=ga.account_id JOIN account_groups g ON g.id=ga.group_id JOIN users u ON u.id=sqlc.arg(user_id)
- WHERE g.tenant_id=sqlc.arg(tenant_id) AND g.enabled=1 AND a.enabled=1 AND a.provider IN ('codex','claude','antigravity') AND a.status='ready' AND u.enabled=1 AND EXISTS(SELECT 1 FROM effective_group_access access WHERE access.group_id=g.id AND access.user_id=u.id)
+ WHERE g.tenant_id=sqlc.arg(tenant_id) AND g.enabled=1 AND a.enabled=1 AND a.provider IN ('codex','claude','antigravity','xai') AND a.status='ready' AND u.enabled=1 AND EXISTS(SELECT 1 FROM effective_group_access access WHERE access.group_id=g.id AND access.user_id=u.id)
 ) THEN 'ready' WHEN EXISTS(
  SELECT 1 FROM group_accounts ga JOIN accounts a ON a.id=ga.account_id JOIN account_groups g ON g.id=ga.group_id JOIN users u ON u.id=sqlc.arg(user_id)
- WHERE g.tenant_id=sqlc.arg(tenant_id) AND g.enabled=1 AND a.enabled=1 AND a.provider IN ('codex','claude','antigravity') AND u.enabled=1 AND EXISTS(SELECT 1 FROM effective_group_access access WHERE access.group_id=g.id AND access.user_id=u.id)
+ WHERE g.tenant_id=sqlc.arg(tenant_id) AND g.enabled=1 AND a.enabled=1 AND a.provider IN ('codex','claude','antigravity','xai') AND u.enabled=1 AND EXISTS(SELECT 1 FROM effective_group_access access WHERE access.group_id=g.id AND access.user_id=u.id)
 ) THEN 'needs_attention' ELSE 'not_configured' END AS status;
 
 -- name: CountGroupMembers :one

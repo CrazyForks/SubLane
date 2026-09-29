@@ -24,7 +24,7 @@ func TestProviderImportsIsolateIdentityAndDiscardEndpointSettings(t *testing.T) 
 		t.Fatal(err)
 	}
 	service := New(connection, cipher)
-	for _, provider := range []string{"claude", "antigravity"} {
+	for _, provider := range []string{"claude", "antigravity", "xai"} {
 		c, err := ParseFor(provider, []byte(`{"type":"`+provider+`","access_token":"synthetic-access","refresh_token":"synthetic-refresh","email":"member@example.test","expired":"2030-01-01T00:00:00Z","base_url":"https://untrusted.example.test","proxy_url":"http://untrusted.example.test","project_id":"synthetic-project"}`))
 		if err != nil {
 			t.Fatal(provider, err)
@@ -48,7 +48,7 @@ func TestProviderImportsIsolateIdentityAndDiscardEndpointSettings(t *testing.T) 
 		}
 	}
 	rows, err := service.List(ctx)
-	if err != nil || len(rows) != 2 {
+	if err != nil || len(rows) != 3 {
 		t.Fatal("same subject across providers collided", err)
 	}
 }
@@ -75,7 +75,7 @@ func TestFailedProviderRefreshCannotPublishUncommittedCredential(t *testing.T) {
 		t.Fatal(err)
 	}
 	service := New(db, cipher)
-	for _, provider := range []string{"codex", "claude", "antigravity"} {
+	for _, provider := range []string{"codex", "claude", "antigravity", "xai"} {
 		original := Credential{Provider: provider, AccessToken: "synthetic-old", RefreshToken: "synthetic-refresh", AccountID: provider, ExpiresAt: 1}
 		row, err := service.Authorize(ctx, provider, original, "")
 		if err != nil {
@@ -111,6 +111,22 @@ func TestProviderImportValidatesMetadata(t *testing.T) {
 	for _, extra := range []string{`"provider":"codex"`, `"project_id":{}`, `"organization_name":12`, `"claude_device_ids":[{}]`, `"project_id":"` + strings.Repeat("x", 1025) + `"`} {
 		if _, err := ParseFor("claude", []byte(`{"type":"claude","access_token":"synthetic","refresh_token":"synthetic","email":"member@example.test",`+extra+`}`)); err == nil {
 			t.Fatal("invalid metadata accepted", extra)
+		}
+	}
+}
+
+func TestGrokImportUsesSubjectAndRejectsIdentityMismatch(t *testing.T) {
+	raw := []byte(`{"type":"xai","access_token":"synthetic-access","refresh_token":"synthetic-refresh","sub":"synthetic-subject","email":"member@example.test","expired":"2030-01-01T00:00:00Z","auth_kind":"oauth","base_url":"https://untrusted.example.test","using_api":true}`)
+	c, err := ParseFor("xai", raw)
+	if err != nil || c.AccountID != "synthetic-subject" {
+		t.Fatal("Grok subject not preserved", err)
+	}
+	if c.Metadata["base_url"] != nil || c.Metadata["using_api"] != nil {
+		t.Fatal("imported execution overrides")
+	}
+	for _, extra := range []string{`"auth_kind":"apikey"`, `"account_id":"other-subject","sub":"synthetic-subject"`} {
+		if _, err := ParseFor("xai", []byte(`{"type":"xai","access_token":"synthetic-access","refresh_token":"synthetic-refresh","email":"member@example.test",`+extra+`}`)); err == nil {
+			t.Fatal("invalid Grok credential accepted")
 		}
 	}
 }

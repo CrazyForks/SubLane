@@ -46,9 +46,14 @@ func (c *Client) providerModels(ctx context.Context, credential accounts.Credent
 	if credential.Kind() == "antigravity" {
 		endpoint, method = "https://daily-cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels", "POST"
 	}
+	if credential.Kind() == "xai" {
+		endpoint = "https://api.x.ai/v1/models"
+	}
 	req, _ := http.NewRequestWithContext(ctx, method, endpoint, strings.NewReader(`{}`))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Anthropic-Version", "2023-06-01")
+	if credential.Kind() == "claude" {
+		req.Header.Set("Anthropic-Version", "2023-06-01")
+	}
 	executor, err := c.executor(credential.Kind())
 	if err != nil {
 		return nil, err
@@ -75,13 +80,13 @@ func (c *Client) providerModels(ctx context.Context, credential accounts.Credent
 		return nil, ErrResponse
 	}
 	result := []Model{}
-	if credential.Kind() == "claude" {
+	if credential.Kind() != "antigravity" {
 		if value.Data == nil {
 			return nil, ErrResponse
 		}
 		for _, m := range value.Data {
 			if m.ID != "" && len(m.ID) <= 128 {
-				result = append(result, Model{ID: m.ID, Object: "model", OwnedBy: "claude"})
+				result = append(result, Model{ID: m.ID, Object: "model", OwnedBy: credential.Kind()})
 			}
 		}
 	} else {

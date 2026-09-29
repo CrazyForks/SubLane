@@ -191,6 +191,10 @@ func sdkAuth(c accounts.Credential) *core.Auth {
 			metadata[key] = v
 		}
 	}
+	if c.Kind() == "xai" {
+		// Without this marker the SDK routes the same token to metered API billing.
+		metadata["auth_kind"] = "oauth"
+	}
 	metadata["access_token"] = c.AccessToken
 	// Execution must never rotate credentials outside the accounts service’s durable write path.
 	delete(metadata, "refresh_token")

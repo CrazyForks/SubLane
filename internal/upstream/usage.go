@@ -52,6 +52,8 @@ func (c *Client) Usage(ctx context.Context, credential accounts.Credential) (Usa
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 	switch credential.Kind() {
+	case "xai":
+		return c.grokUsage(ctx, credential)
 	case "claude":
 		return c.claudeUsage(ctx, credential)
 	case "antigravity":

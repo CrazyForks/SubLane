@@ -14,6 +14,7 @@ import {
   providerLabels,
   callbackURLs,
 } from '@/lib/accounts'
+import { DeviceAuthorization } from './DeviceAuthorization'
 import { ProviderLogo } from './ProviderLogo'
 import { ProxyPicker } from './ProxyPicker'
 import { proxyOptions } from '@/lib/proxies'
@@ -130,6 +131,7 @@ export function ConnectAccount({
     if (busy) return
     setError(null)
     if (method === 'oauth') {
+      if (begin.data?.user_code) return
       if (begin.data)
         finish.mutate({
           state: begin.data.state,
@@ -225,7 +227,9 @@ export function ConnectAccount({
           <DialogDescription>
             {t(
               method === 'oauth'
-                ? 'authorizationInstructions'
+                ? provider === 'xai'
+                  ? 'deviceAuthorizationInstructions'
+                  : 'authorizationInstructions'
                 : provider === 'codex'
                   ? 'accountImportDescription'
                   : 'providerImportDescription',
@@ -240,7 +244,7 @@ export function ConnectAccount({
             <div
               role="group"
               aria-labelledby="provider-label"
-              className="grid grid-cols-3 gap-2"
+              className="grid grid-cols-2 gap-2 sm:grid-cols-4"
             >
               {providers.map((id) => (
                 <Button
@@ -411,29 +415,45 @@ export function ConnectAccount({
                   <Copy aria-hidden="true" />
                 </Button>
               </div>
-              <div className="space-y-2">
-                <label htmlFor="oauth-callback" className="text-sm font-medium">
-                  {t('callbackURL')}
-                </label>
-                <Textarea
-                  id="oauth-callback"
-                  placeholder={`${begin.data.callback_url ?? callbackURLs[provider]}?...`}
-                  rows={3}
-                  value={callback}
-                  onChange={(event) => setCallback(event.target.value)}
-                  maxLength={8192}
-                  autoComplete="off"
-                  spellCheck={false}
-                  disabled={busy}
-                  aria-describedby="callback-hint"
+              {begin.data.user_code ? (
+                <DeviceAuthorization
+                  key={begin.data.state}
+                  authorization={begin.data}
+                  onRestart={start}
+                  onConnected={async () => {
+                    pendingState.current = undefined
+                    await onCreated()
+                    onClose()
+                  }}
                 />
-                <p
-                  id="callback-hint"
-                  className="text-sm leading-6 text-muted-foreground"
-                >
-                  {t('callbackHint')}
-                </p>
-              </div>
+              ) : (
+                <div className="space-y-2">
+                  <label
+                    htmlFor="oauth-callback"
+                    className="text-sm font-medium"
+                  >
+                    {t('callbackURL')}
+                  </label>
+                  <Textarea
+                    id="oauth-callback"
+                    placeholder={`${begin.data.callback_url ?? callbackURLs[provider]}?...`}
+                    rows={3}
+                    value={callback}
+                    onChange={(event) => setCallback(event.target.value)}
+                    maxLength={8192}
+                    autoComplete="off"
+                    spellCheck={false}
+                    disabled={busy}
+                    aria-describedby="callback-hint"
+                  />
+                  <p
+                    id="callback-hint"
+                    className="text-sm leading-6 text-muted-foreground"
+                  >
+                    {t('callbackHint')}
+                  </p>
+                </div>
+              )}
             </div>
           ) : null}
           {(error || failure) && (
@@ -460,27 +480,31 @@ export function ConnectAccount({
                 {t('startAgain')}
               </Button>
             )}
-            <Button
-              type="submit"
-              disabled={
-                busy ||
-                (method === 'oauth' && Boolean(begin.data) && !callback.trim())
-              }
-            >
-              {busy && (
-                <LoaderCircle
-                  className="motion-safe:animate-spin"
-                  aria-hidden="true"
-                />
-              )}
-              {t(
-                method === 'import'
-                  ? 'importAccount'
-                  : begin.data
-                    ? 'completeAuthorization'
-                    : 'startAuthorization',
-              )}
-            </Button>
+            {!begin.data?.user_code && (
+              <Button
+                type="submit"
+                disabled={
+                  busy ||
+                  (method === 'oauth' &&
+                    Boolean(begin.data) &&
+                    !callback.trim())
+                }
+              >
+                {busy && (
+                  <LoaderCircle
+                    className="motion-safe:animate-spin"
+                    aria-hidden="true"
+                  />
+                )}
+                {t(
+                  method === 'import'
+                    ? 'importAccount'
+                    : begin.data
+                      ? 'completeAuthorization'
+                      : 'startAuthorization',
+                )}
+              </Button>
+            )}
           </DialogFooter>
         </form>
       </DialogContent>

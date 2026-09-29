@@ -12,7 +12,7 @@ import (
 const getSetupAccounts = `-- name: GetSetupAccounts :one
 SELECT CAST(COUNT(*) AS INTEGER) AS enabled,
 CAST(COALESCE(SUM(CASE WHEN status='ready' THEN 1 ELSE 0 END),0) AS INTEGER) AS verified
-FROM accounts WHERE tenant_id=?1 AND enabled=1 AND provider IN ('codex','claude','antigravity')
+FROM accounts WHERE tenant_id=?1 AND enabled=1 AND provider IN ('codex','claude','antigravity','xai')
 `
 
 type GetSetupAccountsRow struct {

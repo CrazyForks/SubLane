@@ -32,13 +32,19 @@ type namedProvider interface {
 }
 
 type Authorization struct {
-	CallbackURL string `json:"callback_url"`
+	UserCode    string `json:"user_code,omitempty"`
+	Interval    int64  `json:"interval,omitempty"`
+	CallbackURL string `json:"callback_url,omitempty"`
 	URL         string `json:"url"`
 	State       string `json:"state"`
 	ExpiresAt   int64  `json:"expires_at"`
 }
 
 type pending struct {
+	device                                       string
+	interval                                     int64
+	nextPoll                                     time.Time
+	polling                                      bool
 	owner                                        [32]byte
 	verifier, name, replaceID, provider, proxyID string
 	expires                                      time.Time
@@ -98,29 +104,25 @@ func (f *Flow) BeginProviderWithProxy(ctx context.Context, provider, session, na
 	owner := sha256.Sum256([]byte(session))
 	state, verifier := randomToken(), randomToken()
 	expires := f.now().Add(10 * time.Minute)
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	for key, value := range f.pending {
-		if !value.expires.After(f.now()) || value.owner == owner {
-			delete(f.pending, key)
-		}
+	entry := pending{provider: provider, owner: owner, verifier: verifier, name: name, replaceID: replaceID, proxyID: proxyID, expires: expires}
+	if err := f.reserve(state, entry); err != nil {
+		return Authorization{}, err
 	}
-	if len(f.pending) >= 8 {
-		return Authorization{}, ErrBusy
+	if provider == "xai" {
+		return f.beginDevice(ctx, session, state, entry)
 	}
-	f.pending[state] = pending{provider: provider, owner: owner, verifier: verifier, name: name, replaceID: replaceID, proxyID: proxyID, expires: expires}
 	challenge := sha256.Sum256([]byte(verifier))
 	url := f.provider.AuthorizationURL(state, base64.RawURLEncoding.EncodeToString(challenge[:]))
 	if provider != "codex" {
 		named, ok := f.provider.(namedProvider)
 		if !ok {
-			delete(f.pending, state)
+			_ = f.Cancel(session, state)
 			return Authorization{}, accounts.ErrInput
 		}
 		var err error
 		url, err = named.AuthorizationURLFor(provider, state, base64.RawURLEncoding.EncodeToString(challenge[:]))
 		if err != nil {
-			delete(f.pending, state)
+			_ = f.Cancel(session, state)
 			return Authorization{}, err
 		}
 	}
@@ -142,6 +144,10 @@ func (f *Flow) Finish(ctx context.Context, session, state, callback string) (acc
 		delete(f.pending, state)
 		f.mu.Unlock()
 		return accounts.Account{}, accounts.ErrProviderDisabled
+	}
+	if entry.provider == "xai" {
+		f.mu.Unlock()
+		return accounts.Account{}, ErrCallback
 	}
 	code, err := callbackCodeFor(entry.provider, callback, state)
 	if errors.Is(err, ErrCallback) {
@@ -222,4 +228,19 @@ func randomToken() string {
 	value := make([]byte, 32)
 	_, _ = rand.Read(value)
 	return base64.RawURLEncoding.EncodeToString(value)
+}
+
+func (f *Flow) reserve(state string, entry pending) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for key, value := range f.pending {
+		if !value.expires.After(f.now()) || value.owner == entry.owner {
+			delete(f.pending, key)
+		}
+	}
+	if len(f.pending) >= 8 {
+		return ErrBusy
+	}
+	f.pending[state] = entry
+	return nil
 }

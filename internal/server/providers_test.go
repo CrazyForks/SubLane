@@ -12,7 +12,7 @@ import (
 )
 
 func TestProviderRoutesUseBuiltInExecutors(t *testing.T) {
-	for _, provider := range []string{"claude", "antigravity"} {
+	for _, provider := range []string{"claude", "antigravity", "xai"} {
 		t.Run(provider, func(t *testing.T) {
 			fixture := newProviderFixture(t, provider, func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "text/event-stream")
@@ -21,6 +21,11 @@ func TestProviderRoutesUseBuiltInExecutors(t *testing.T) {
 						t.Errorf("wrong Claude endpoint %s", r.URL.Path)
 					}
 					io.WriteString(w, "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_synthetic\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"synthetic-model\",\"content\":[],\"usage\":{\"input_tokens\":1,\"output_tokens\":0}}}\n\nevent: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\nevent: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"Synthetic response\"}}\n\nevent: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\nevent: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":1}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n")
+				} else if provider == "xai" {
+					if r.URL.Path != "/v1/responses" || r.Header.Get("X-XAI-Token-Auth") != "xai-grok-cli" {
+						t.Error("wrong Grok subscription request")
+					}
+					io.WriteString(w, "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"Synthetic response\",\"output_index\":0,\"content_index\":0}\n\nevent: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"synthetic-response\",\"object\":\"response\",\"status\":\"completed\",\"model\":\"synthetic-model\",\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"Synthetic response\"}]}],\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n")
 				} else {
 					if !strings.Contains(r.URL.Path, "streamGenerateContent") {
 						t.Errorf("wrong Antigravity endpoint %s", r.URL.Path)

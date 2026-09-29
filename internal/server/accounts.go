@@ -30,6 +30,7 @@ func (h *accountHTTP) register(router chi.Router) {
 		accounts.Post("/import", h.importCredential)
 		accounts.Post("/oauth", h.beginOAuth)
 		accounts.Post("/oauth/complete", h.finishOAuth)
+		accounts.Post("/oauth/poll", h.pollOAuth)
 		accounts.Delete("/oauth/{state}", h.cancelOAuth)
 		accounts.Patch("/{id}", h.setEnabled)
 		accounts.Delete("/{id}", h.remove)
