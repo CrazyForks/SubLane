@@ -92,6 +92,8 @@ type observation struct {
 	quotaReadStartedAt int64
 	quotaRevision      int64
 	quota              *upstream.Usage
+	modelState         *modelRuntime
+	modelLimited       bool
 }
 
 func (s *Service) begin(ctx context.Context, userID, groupID int64, kind Kind) (*observation, error) {
@@ -220,6 +222,9 @@ func (e *observation) finish(outcome, code, penalty, retry string) {
 			}
 		}
 		// Admission must not observe released leases before the token charge commits.
+		if s.finishModelRuntime(ctx, e, outcome, retry) {
+			runtimeFailed = true
+		}
 		defer s.mu.Unlock()
 		err := s.persistObservation(ctx, e)
 		if err != nil {
@@ -290,6 +295,8 @@ func classify(ctx context.Context, err error) (outcome, code, penalty string) {
 		return "rejected", "account_busy", ""
 	case errors.Is(err, ErrAccountCooling):
 		return "rejected", "account_cooling", ""
+	case errors.Is(err, ErrModelCooling):
+		return "rejected", "model_cooling", ""
 	case errors.Is(err, ErrNoAccount), errors.Is(err, ErrAffinityUnavailable), errors.Is(err, accounts.ErrDisabled), errors.Is(err, accounts.ErrNotFound):
 		return "rejected", "account_unavailable", ""
 	case errors.Is(err, groups.ErrUnavailable):
@@ -321,6 +328,10 @@ func (e *observation) fail(err error) {
 		status := int64(rejected.Status)
 		e.record.UpstreamStatus = &status
 		outcome, code, penalty := statusOutcome(rejected.Status)
+		if rejected.Status == 429 && e.modelState != nil && rejected.LimitedModel == e.modelState.key.model {
+			e.modelLimited = true
+			code, penalty = "model_rate_limited", ""
+		}
 		e.finish(outcome, code, penalty, rejected.RetryAfter)
 		return
 	}

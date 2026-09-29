@@ -12,7 +12,32 @@ import (
 	"github.com/murongg/SubLane/internal/accounts"
 	"github.com/murongg/SubLane/internal/allocations"
 	"github.com/murongg/SubLane/internal/gateway"
+	"github.com/murongg/SubLane/internal/upstream"
 )
+
+func TestUpstreamForbiddenDoesNotRequestReauthorization(t *testing.T) {
+	w := httptest.NewRecorder()
+	gatewayError(w, &upstream.UpstreamError{Status: 403})
+	if w.Code != 403 || !strings.Contains(w.Body.String(), "upstream_forbidden") || strings.Contains(w.Body.String(), "reauthorization") {
+		t.Fatal("permission denial misclassified as credential failure", w.Code, w.Body.String())
+	}
+}
+
+func TestModelLimitErrorsExposeOnlySafeScopeAndRetry(t *testing.T) {
+	for _, test := range []struct {
+		err  error
+		code string
+	}{
+		{&upstream.UpstreamError{Status: 429, RetryAfter: "120", LimitedModel: "synthetic-model"}, "model_rate_limited"},
+		{&gateway.CoolingError{RetryAfter: 120, Model: "synthetic-model"}, "model_cooling"},
+	} {
+		w := httptest.NewRecorder()
+		gatewayError(w, test.err)
+		if w.Code != 429 || w.Header().Get("Retry-After") != "120" || !strings.Contains(w.Body.String(), test.code) || strings.Contains(w.Body.String(), "synthetic-model") {
+			t.Fatal("model limit lost safe diagnostic or retry", w.Code, w.Header(), w.Body.String())
+		}
+	}
+}
 
 func TestCredentialRefreshFailureHasTemporaryStatusAndRetry(t *testing.T) {
 	w := httptest.NewRecorder()

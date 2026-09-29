@@ -128,6 +128,9 @@ func (s *Service) selectAllocationAccount(ctx context.Context, userID, groupID i
 			if err := s.accountAdmission(*bound); err != nil {
 				return id, digest, err
 			}
+			if err := s.modelAdmission(ctx, q, id, model); err != nil {
+				return id, digest, err
+			}
 			if err := s.quotaAdmission(ctx, q, *bound, model); err != nil {
 				return id, digest, err
 			}
@@ -155,6 +158,7 @@ func (s *Service) selectAllocationAccount(ctx context.Context, userID, groupID i
 	bestRank := 2
 	busy, unknown, eligible := false, false, false
 	var cooling, quotaWait int64
+	var coolingModel string
 	var allocationErr error
 	for _, account := range available {
 		if !s.accounts.ProviderEnabled(account.Provider) || !allowed[account.ID] || !account.Enabled || account.Status == "reauth_required" || (provider != "" && account.Provider != provider) || (kind == Compact && account.Provider != "codex") {
@@ -184,6 +188,7 @@ func (s *Service) selectAllocationAccount(ctx context.Context, userID, groupID i
 			var wait *CoolingError
 			if errors.As(err, &wait) && (cooling == 0 || wait.RetryAfter < cooling) {
 				cooling = wait.RetryAfter
+				coolingModel = ""
 			}
 			continue
 		}
@@ -196,6 +201,21 @@ func (s *Service) selectAllocationAccount(ctx context.Context, userID, groupID i
 				quotaWait = quota.RetryAfter
 			}
 			continue
+		}
+		if err := s.modelAdmission(ctx, q, account.ID, model); err != nil {
+			if errors.Is(err, ErrAccountBusy) {
+				busy = true
+				continue
+			}
+			var wait *CoolingError
+			if errors.As(err, &wait) {
+				if cooling == 0 || wait.RetryAfter < cooling {
+					cooling = wait.RetryAfter
+					coolingModel = wait.Model
+				}
+				continue
+			}
+			return "", digest, err
 		}
 		if scheme != 0 {
 			if _, err := allocations.Check(ctx, q, scheme, userID, groupID, account.ID, model, now, s.location()); err != nil {
@@ -228,7 +248,7 @@ func (s *Service) selectAllocationAccount(ctx context.Context, userID, groupID i
 			return "", digest, ErrAccountBusy
 		}
 		if cooling > 0 {
-			return "", digest, &CoolingError{RetryAfter: cooling}
+			return "", digest, &CoolingError{RetryAfter: cooling, Model: coolingModel}
 		}
 		if quotaWait > 0 {
 			return "", digest, &QuotaError{RetryAfter: quotaWait}

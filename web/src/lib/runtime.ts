@@ -10,6 +10,7 @@ const runtimeSchema = z.object({
   cooldown_until: z.number().int().nonnegative(),
   reason: z.string(),
   failures: z.number().int().nonnegative(),
+  limited_models: z.number().int().nonnegative().default(0),
   state: z.enum([
     'available',
     'cooling',
@@ -78,6 +79,8 @@ export const reasonKeys: Record<string, keyof typeof en> = {
   account_queue_full: 'reasonAccountQueueFull',
   account_wait_timeout: 'reasonAccountWaitTimeout',
   account_cooling: 'reasonCooling',
+  model_cooling: 'reasonModelRateLimited',
+  model_rate_limited: 'reasonModelRateLimited',
   account_unavailable: 'reasonAccountUnavailable',
   group_unavailable: 'reasonGroupUnavailable',
   auth_required: 'reasonAuthRequired',

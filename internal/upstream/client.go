@@ -257,8 +257,9 @@ func (c *Client) models(ctx context.Context, credential accounts.Credential, ver
 }
 
 type UpstreamError struct {
-	Status     int
-	RetryAfter string
+	Status       int
+	RetryAfter   string
+	LimitedModel string
 }
 
 func (e *UpstreamError) Error() string { return "upstream_rejected_request" }

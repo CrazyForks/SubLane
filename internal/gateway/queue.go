@@ -101,6 +101,10 @@ func (s *Service) leaseAccount(ctx context.Context, entry *observation, session,
 	if err := admissionCtx.Err(); err != nil {
 		return id, digest, err
 	}
+	modelState, err := s.modelLease(admissionCtx, id, model)
+	if err != nil {
+		return id, digest, err
+	}
 	if entry.schemeID != 0 {
 		tx, beginErr := s.db.BeginTx(admissionCtx, nil)
 		if beginErr != nil {
@@ -117,6 +121,11 @@ func (s *Service) leaseAccount(ctx context.Context, entry *observation, session,
 	}
 	state := s.health[id]
 	state.InFlight++
+	if modelState != nil {
+		modelState.inFlight++
+		s.modelHealth[modelState.key] = modelState
+		entry.modelState = modelState
+	}
 	// Arrival can precede a failure while queued; only an admitted request may count as its recovery.
 	s.sequence++
 	entry.sequence = s.sequence

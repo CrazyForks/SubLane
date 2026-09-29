@@ -674,6 +674,57 @@ it('explains a cooling account separately from its active concurrency', async ()
   expect(screen.getByText(/Active requests continue/)).toBeTruthy()
 })
 
+it('shows model limits without reporting account-wide cooling and clears them from scheduling settings', async () => {
+  let limited = 1
+  const fetch = vi.fn().mockImplementation((url: string) => {
+    if (url === '/api/auth/state')
+      return Promise.resolve(response(authenticated))
+    if (url === '/api/accounts/runtime')
+      return Promise.resolve(
+        response({
+          server_time: Math.floor(Date.now() / 1000),
+          accounts: [
+            {
+              id: account.id,
+              state: 'available',
+              max_concurrency: 30,
+              in_flight: 0,
+              cooldown_until: 0,
+              reason: '',
+              failures: 0,
+              limited_models: limited,
+            },
+          ],
+        }),
+      )
+    if (url === '/api/accounts/synthetic-account/resume') {
+      limited = 0
+      return Promise.resolve(new Response(null, { status: 204 }))
+    }
+    return Promise.resolve(
+      response({
+        accounts: [{ ...account, provider: 'antigravity', status: 'ready' }],
+      }),
+    )
+  })
+  vi.stubGlobal('fetch', fetch)
+  open()
+  await screen.findByText('1 model limited')
+  const user = userEvent.setup()
+  await user.click(
+    screen.getByRole('button', { name: 'Actions for Test subscription' }),
+  )
+  await user.click(
+    screen.getByRole('menuitem', { name: 'Scheduling settings' }),
+  )
+  const dialog = await screen.findByRole('dialog')
+  await user.click(
+    within(dialog).getByRole('button', { name: 'Clear cooldown' }),
+  )
+  await within(dialog).findByText('Cooldown cleared.')
+  await waitFor(() => expect(screen.queryByText('1 model limited')).toBeNull())
+})
+
 it('identifies an unassigned account and offers pool setup', async () => {
   vi.stubGlobal(
     'fetch',

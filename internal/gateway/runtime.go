@@ -15,11 +15,20 @@ import (
 
 var ErrAccountBusy = errors.New("account_busy")
 var ErrAccountCooling = errors.New("account_cooling")
+var ErrModelCooling = errors.New("model_cooling")
 
-type CoolingError struct{ RetryAfter int64 }
+type CoolingError struct {
+	RetryAfter int64
+	Model      string
+}
 
-func (e *CoolingError) Error() string { return ErrAccountCooling.Error() }
-func (e *CoolingError) Unwrap() error { return ErrAccountCooling }
+func (e *CoolingError) Error() string { return e.Unwrap().Error() }
+func (e *CoolingError) Unwrap() error {
+	if e.Model != "" {
+		return ErrModelCooling
+	}
+	return ErrAccountCooling
+}
 
 type Runtime struct {
 	lastFailureSequence int64
@@ -31,19 +40,25 @@ type Runtime struct {
 	Failures            int64  `json:"failures"`
 	State               string `json:"state"`
 	QuotaState          string `json:"quota_state"`
+	LimitedModels       int64  `json:"limited_models"`
 	lastFailureAt       int64
 	revision            int64
 }
 
 // Caller holds s.mu. Cached state keeps a failed persistence attempt from reopening a cooling account.
 func (s *Service) loadRuntime(ctx context.Context) error {
+	if err := s.queries.DeleteObsoleteModelRuntime(ctx, db.DeleteObsoleteModelRuntimeParams{WorkspaceID: s.tenantID, Now: s.now().Unix()}); err != nil {
+		return err
+	}
 	rows, err := s.queries.ListAccountRuntime(ctx, s.tenantID)
 	if err != nil {
 		return err
 	}
 	present := make(map[string]bool, len(rows))
+	current := make(map[string]db.ListAccountRuntimeRow, len(rows))
 	for _, row := range rows {
 		present[row.ID] = true
+		current[row.ID] = row
 		state := s.health[row.ID]
 		if state == nil {
 			state = &Runtime{ID: row.ID, CooldownUntil: row.CooldownUntil, Reason: row.Reason, Failures: row.Failures, lastFailureAt: row.LastFailureAt, revision: row.Revision}
@@ -54,6 +69,14 @@ func (s *Service) loadRuntime(ctx context.Context) error {
 	for id, state := range s.health {
 		if !present[id] && state.InFlight == 0 {
 			delete(s.health, id)
+		}
+	}
+	// Superseded authorization/resume epochs must release even failed-write
+	// cache entries. Existing leases keep their own pointer and cannot republish it.
+	for key, model := range s.modelHealth {
+		row, ok := current[key.account]
+		if !ok || model.lifecycle != row.Lifecycle || model.runtimeRevision != row.Revision {
+			delete(s.modelHealth, key)
 		}
 	}
 	return nil
@@ -72,6 +95,12 @@ func (s *Service) Runtime(ctx context.Context) ([]Runtime, error) {
 	now := s.now().Unix()
 	for _, row := range rows {
 		state := *s.health[row.ID]
+		state.LimitedModels = row.LimitedModels
+		for _, model := range s.modelHealth {
+			if model.key.account == row.ID && model.lifecycle == row.Lifecycle && model.runtimeRevision == row.Revision && model.persistFailed && model.version == 0 && model.failures > 0 {
+				state.LimitedModels++
+			}
+		}
 		state.State = "available"
 		if state.CooldownUntil > now {
 			state.State = "cooling"
@@ -154,6 +183,9 @@ func (s *Service) Resume(ctx context.Context, id string) error {
 	if err := q.SaveAccountRuntime(ctx, s.runtimeParams(&next)); err != nil {
 		return err
 	}
+	if err := q.DeleteAccountModelRuntime(ctx, db.DeleteAccountModelRuntimeParams{TargetID: id, WorkspaceID: s.tenantID}); err != nil {
+		return err
+	}
 	if err := audit.Record(ctx, q, "account.resume", "account", id); err != nil {
 		return err
 	}
@@ -161,6 +193,12 @@ func (s *Service) Resume(ctx context.Context, id string) error {
 		return err
 	}
 	*state = next
+	for key := range s.modelHealth {
+		if key.account == id {
+			delete(s.modelHealth, key)
+		}
+	}
+	s.notifyCapacity()
 	return nil
 }
 func (s *Service) persistRuntime(ctx context.Context, state *Runtime) error {

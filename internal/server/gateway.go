@@ -304,6 +304,8 @@ func gatewayFailure(err error) (int, string) {
 		return 403, "quota_exhausted"
 	case errors.Is(err, gateway.ErrAccountCooling):
 		return 429, "account_cooling"
+	case errors.Is(err, gateway.ErrModelCooling):
+		return 429, "model_cooling"
 	case errors.Is(err, gateway.ErrMemberBusy):
 		return 429, "member_busy"
 	case errors.Is(err, gateway.ErrMemberRate):
@@ -330,9 +332,14 @@ func gatewayFailure(err error) (int, string) {
 			return 400, "upstream_invalid_request"
 		case 404:
 			return 404, "model_not_found"
-		case 401, 403:
+		case 401:
 			return 503, "account_reauthorization_required"
+		case 403:
+			return 403, "upstream_forbidden"
 		case 429:
+			if rejected.LimitedModel != "" {
+				return 429, "model_rate_limited"
+			}
 			return 429, "upstream_rate_limited"
 		default:
 			return 502, "upstream_unavailable"

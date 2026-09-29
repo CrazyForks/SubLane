@@ -195,6 +195,11 @@ func sdkAuth(c accounts.Credential) *core.Auth {
 		// Without this marker the SDK routes the same token to metered API billing.
 		metadata["auth_kind"] = "oauth"
 	}
+	if c.Kind() == "antigravity" {
+		// SubLane owns durable, lifecycle-aware cooldowns. SDK-local timers can
+		// turn a model-specific response into an unscoped 429 before transport IO.
+		metadata["disable_cooling"] = true
+	}
 	metadata["access_token"] = c.AccessToken
 	// Execution must never rotate credentials outside the accounts service’s durable write path.
 	delete(metadata, "refresh_token")
@@ -242,7 +247,7 @@ func (c *Client) runSDK(ctx context.Context, credential accounts.Credential, bod
 		return nil, err
 	}
 	version := c.codexVersion()
-	transport := &engineTransport{base: &boundTransport{base: c.http.Transport, address: credential.ProxyURL}, codexVersion: version}
+	transport := &engineTransport{base: &boundTransport{base: c.http.Transport, address: credential.ProxyURL}, codexVersion: version, provider: credential.Kind()}
 	transport.validateGeminiStream = credential.Kind() == "antigravity" && (opts.SourceFormat == translator.FormatClaude || opts.SourceFormat == translator.FormatGemini)
 	if !opts.Stream {
 		transport.maxResponseBytes = MaxBody
@@ -258,6 +263,7 @@ func (c *Client) runSDK(ctx context.Context, credential accounts.Credential, bod
 	if json.Unmarshal(body, &request) != nil {
 		return nil, ErrInput
 	}
+	transport.requestedModel = CatalogModelID(request.Model)
 	if opts.SourceFormat == translator.FormatGemini {
 		var native map[string]json.RawMessage
 		if json.Unmarshal(body, &native) != nil || native == nil {
@@ -336,6 +342,10 @@ func sdkFailureResponse(err error, transport *engineTransport) (*http.Response, 
 			wait = failure.RetryAfter
 		}
 		headers.Set("Retry-After", wait)
+		if model := transport.limitedModel(failure.Status); model != "" {
+			failure.LimitedModel, failure.RetryAfter = model, wait
+			return nil, failure
+		}
 		return &http.Response{StatusCode: failure.Status, Header: headers, Body: io.NopCloser(bytes.NewReader(nil))}, nil
 	}
 	return nil, sdkError(err)
@@ -356,6 +366,11 @@ type engineTransport struct {
 	base                 http.RoundTripper
 	mu                   sync.Mutex
 	retryAfter           string
+	provider             string
+	requestedModel       string
+	rateModel            string
+	lastStatus           int
+	responseEpoch        uint64
 }
 
 func (t *engineTransport) RoundTrip(r *http.Request) (*http.Response, error) {
@@ -372,11 +387,14 @@ func (t *engineTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 		response.Body.Close()
 		return nil, ErrUpstream
 	}
+	t.mu.Lock()
+	t.responseEpoch++
+	epoch := t.responseEpoch
+	t.lastStatus, t.rateModel = response.StatusCode, ""
 	if response.StatusCode >= 400 {
-		t.mu.Lock()
 		t.retryAfter = response.Header.Get("Retry-After")
-		t.mu.Unlock()
 	}
+	t.mu.Unlock()
 	limit := t.maxResponseBytes
 	if limit == 0 && response.StatusCode >= 400 {
 		limit = MaxBody
@@ -384,10 +402,31 @@ func (t *engineTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	if limit > 0 {
 		response.Body = &responseLimitBody{ReadCloser: response.Body, remaining: limit}
 	}
+	if response.StatusCode == http.StatusTooManyRequests && t.provider == "antigravity" {
+		response.Body = &limitMetadataBody{ReadCloser: response.Body, complete: func(raw []byte) {
+			model := antigravityLimitedModel(raw, t.requestedModel)
+			t.mu.Lock()
+			defer t.mu.Unlock()
+			// SDK fallback can leave an older response body open. Only the last
+			// fully observed attempt may narrow the final error's scope.
+			if t.responseEpoch == epoch {
+				t.rateModel = model
+			}
+		}}
+	}
 	if t.validateGeminiStream && response.StatusCode >= 200 && response.StatusCode < 300 && strings.HasPrefix(response.Header.Get("Content-Type"), "text/event-stream") {
 		response.Body = guardGeminiStream(response.Body)
 	}
 	return response, nil
+}
+
+func (t *engineTransport) limitedModel(status int) string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if status == http.StatusTooManyRequests && t.lastStatus == status {
+		return t.rateModel
+	}
+	return ""
 }
 
 type responseLimitBody struct {

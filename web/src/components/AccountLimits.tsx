@@ -117,16 +117,23 @@ export function AccountLimits({
               </p>
             )}
           </div>
-          {runtime && runtime.failures > 0 && (
+          {runtime && (runtime.failures > 0 || runtime.limited_models > 0) && (
             <div className="space-y-3 border-t border-border pt-4">
-              <p className="text-sm">
-                {t('lastAccountFailure')}:{' '}
-                {t(reasonKeys[runtime.reason] ?? 'reasonUnknown')}
-              </p>
+              {runtime.failures > 0 && (
+                <p className="text-sm">
+                  {t('lastAccountFailure')}:{' '}
+                  {t(reasonKeys[runtime.reason] ?? 'reasonUnknown')}
+                </p>
+              )}
+              {runtime.limited_models > 0 && (
+                <p className="text-sm">
+                  {t('accountModelLimits', { count: runtime.limited_models })}
+                </p>
+              )}
               <p className="text-xs leading-5 text-muted-foreground">
                 {t('resumeAccountHint')}
               </p>
-              {runtime.cooldown_until > 0 && (
+              {(runtime.cooldown_until > 0 || runtime.limited_models > 0) && (
                 <Button
                   type="button"
                   variant="outline"

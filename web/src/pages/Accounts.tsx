@@ -357,6 +357,15 @@ export function Accounts() {
                           </p>
                           {account.enabled &&
                             account.status !== 'reauth_required' &&
+                            state.limited_models > 0 && (
+                              <p className="text-xs text-warning">
+                                {t('accountModelLimits', {
+                                  count: state.limited_models,
+                                })}
+                              </p>
+                            )}
+                          {account.enabled &&
+                            account.status !== 'reauth_required' &&
                             state.state !== 'available' && (
                               <>
                                 <Status kind="warning">

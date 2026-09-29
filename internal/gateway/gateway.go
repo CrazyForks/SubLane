@@ -49,6 +49,7 @@ type Service struct {
 	mu                 sync.Mutex
 	next               map[string]int
 	health             map[string]*Runtime
+	modelHealth        map[modelKey]*modelRuntime
 	memberActive       map[int64]int64
 	waiting            map[int64]int
 	capacityChanged    chan struct{}
@@ -85,7 +86,7 @@ func NewForTenant(ctx context.Context, connection *sql.DB, accounts *accounts.Se
 	if len(catalogs) > 0 {
 		catalog = catalogs[0]
 	}
-	return &Service{memberActive: make(map[int64]int64), waiting: make(map[int64]int), capacityChanged: make(chan struct{}), accountWaitTimeout: 10 * time.Second, next: make(map[string]int), health: make(map[string]*Runtime), now: time.Now, runContext: runContext, stopRuntime: stopRuntime, db: connection, queries: db.New(connection), accounts: accounts, tenantID: tenantID, provider: provider, slots: make(chan struct{}, 30), usage: newUsageCache(ctx), catalog: newCatalogCache(ctx), pricing: catalog}
+	return &Service{memberActive: make(map[int64]int64), waiting: make(map[int64]int), capacityChanged: make(chan struct{}), accountWaitTimeout: 10 * time.Second, next: make(map[string]int), health: make(map[string]*Runtime), modelHealth: make(map[modelKey]*modelRuntime), now: time.Now, runContext: runContext, stopRuntime: stopRuntime, db: connection, queries: db.New(connection), accounts: accounts, tenantID: tenantID, provider: provider, slots: make(chan struct{}, 30), usage: newUsageCache(ctx), catalog: newCatalogCache(ctx), pricing: catalog}
 }
 
 func (s *Service) Acquire() (func(), error) {
