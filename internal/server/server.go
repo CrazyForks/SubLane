@@ -57,6 +57,7 @@ type Options struct {
 func New(o Options) http.Handler {
 	router := chi.NewRouter()
 	router.Use(
+		requestLogging,
 		middleware.SetHeader("X-Content-Type-Options", "nosniff"),
 		middleware.SetHeader("Referrer-Policy", "same-origin"),
 		middleware.SetHeader("X-Frame-Options", "DENY"),

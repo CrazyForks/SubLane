@@ -31,6 +31,7 @@ type multiHTTP struct {
 func NewMulti(connection *sql.DB, identity *auth.Service, tenancy *tenants.Service, publicURL string, tenantHandler func(int64) http.Handler) http.Handler {
 	h := &multiHTTP{connection: connection, identity: identity, tenancy: tenancy, publicURL: publicURL, forTenant: tenantHandler}
 	router := chi.NewRouter()
+	router.Use(requestLogging)
 	routeErrors(router)
 	router.Route("/api/workspaces", func(global chi.Router) {
 		routeErrors(global)

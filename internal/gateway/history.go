@@ -136,12 +136,41 @@ func (e *observation) finish(outcome, code, penalty, retry string) {
 		e.record.Outcome = outcome
 		e.record.ErrorCode = code
 		e.record.DurationMs = max(0, e.service.now().Sub(e.started).Milliseconds())
+		var quotaFailed, runtimeFailed, historyFailed bool
+		// Emit after the later mutex-unlock defer: slow stdout must not block admission.
+		defer func() {
+			if quotaFailed {
+				e.log(slog.LevelWarn, "Unable to persist response quota", "persist_quota_failed")
+			}
+			if runtimeFailed {
+				e.log(slog.LevelError, "Unable to persist account cooldown", "persist_cooldown_failed")
+			}
+			if historyFailed {
+				e.log(slog.LevelError, "Unable to persist request metadata", "persist_request_failed")
+			}
+			level := slog.LevelDebug
+			switch outcome {
+			case "success":
+				if e.record.Transport == "websocket" {
+					level = slog.LevelInfo
+				}
+			case "canceled":
+			case "incomplete", "rejected":
+				level = slog.LevelWarn
+			default:
+				level = slog.LevelError
+			}
+			if code == "rate_limited" {
+				level = slog.LevelWarn
+			}
+			e.log(level, "Gateway request completed", code)
+		}()
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 		s := e.service
 		if e.quota != nil && (outcome == "success" || outcome == "incomplete") {
 			if err := s.observeUsage(ctx, e.record.AccountID, e.quotaRevision, *e.quota); err != nil {
-				slog.Warn("Unable to persist response quota")
+				quotaFailed = true
 			}
 		}
 		s.mu.Lock()
@@ -183,7 +212,7 @@ func (e *observation) finish(outcome, code, penalty, retry string) {
 					}
 					if changed {
 						if err := s.persistRuntime(ctx, state); err != nil {
-							slog.Error("Unable to persist account cooldown", "account_id", state.ID)
+							runtimeFailed = true
 						}
 					}
 				}
@@ -197,7 +226,7 @@ func (e *observation) finish(outcome, code, penalty, retry string) {
 			if e.allocationTracked {
 				s.failedSettlements = append(s.failedSettlements, e)
 			}
-			slog.Error("Unable to persist request metadata")
+			historyFailed = true
 		}
 		if e.leased {
 			s.notifyCapacity()

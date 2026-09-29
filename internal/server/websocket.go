@@ -54,9 +54,13 @@ func (h *keyHTTP) websocket(w http.ResponseWriter, r *http.Request) {
 			writeGatewayError(w, status, "websocket_upgrade_failed")
 		},
 	}
-	conn, err := upgrader.Upgrade(w, r, http.Header{"Cache-Control": {"no-store"}})
+	// Gorilla writes the handshake after hijacking, bypassing ordinary response headers.
+	conn, err := upgrader.Upgrade(w, r, http.Header{"Cache-Control": {"no-store"}, "X-Request-ID": {gateway.RequestID(r.Context())}})
 	if err != nil {
 		return
+	}
+	if state, ok := r.Context().Value(requestLogKey{}).(*requestLogState); ok {
+		state.upgraded = true
 	}
 	defer conn.Close()
 	ctx, cancel := context.WithCancel(r.Context())

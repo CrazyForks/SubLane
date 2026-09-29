@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"errors"
-	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -11,6 +10,8 @@ import (
 
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/murongg/SubLane/internal/audit"
+	"github.com/murongg/SubLane/internal/gateway"
+	"github.com/murongg/SubLane/internal/logging"
 )
 
 type auditHTTP struct{ service *audit.Service }
@@ -55,7 +56,10 @@ func (h *authHTTP) auditRequest(next http.Handler, w http.ResponseWriter, r *htt
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 2*time.Second)
 	defer cancel()
 	if err := h.audit.Failure(ctx, action, resource, id, writer.Status()); err != nil {
-		slog.Error("failed to persist management audit attempt")
+		logging.From(r.Context()).ErrorContext(ctx, "failed to persist management audit attempt",
+			"request_id", gateway.RequestID(r.Context()), "tenant_id", h.tenantID,
+			"action", action, "resource", resource, "resource_id", id,
+			"status", writer.Status(), "error_code", "persist_audit_failed")
 	}
 }
 func auditTarget(r *http.Request) (string, string, string) {
