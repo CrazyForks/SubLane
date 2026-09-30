@@ -14,6 +14,7 @@ import (
 	"github.com/murongg/SubLane/internal/apikey"
 	"github.com/murongg/SubLane/internal/audit"
 	"github.com/murongg/SubLane/internal/auth"
+	"github.com/murongg/SubLane/internal/capacity"
 	"github.com/murongg/SubLane/internal/gateway"
 	"github.com/murongg/SubLane/internal/groups"
 	"github.com/murongg/SubLane/internal/oauth"
@@ -31,6 +32,15 @@ type tenantRuntime struct {
 	gateway  *gateway.Service
 	active   int
 	lastUsed time.Time
+}
+
+func (r *tenantRegistry) Capacity(ctx context.Context, id int64) ([]capacity.Pool, error) {
+	runtime := r.acquire(id)
+	if runtime == nil {
+		return nil, alerts.ErrCapacityUnavailable
+	}
+	defer r.release(runtime)
+	return runtime.gateway.WorkspaceCapacity(ctx)
 }
 
 const runtimeIdleTimeout = 5 * time.Minute

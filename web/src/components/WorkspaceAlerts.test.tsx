@@ -7,6 +7,49 @@ import { createQueryClient } from '@/lib/query'
 import { authKey } from '@/lib/auth'
 import { authenticated } from '@/test/fixtures'
 
+it('tests the saved destination explicitly and reports delivery failure', async () => {
+  const client = createQueryClient()
+  client.setQueryData(authKey, authenticated)
+  const fetcher = vi.fn((url: string) =>
+    Promise.resolve(
+      new Response(
+        JSON.stringify(
+          url.endsWith('/test')
+            ? { error: 'alert_delivery_failed' }
+            : {
+                enabled: false,
+                configured: true,
+                destination: 'hooks.example.test',
+                last_delivered_at: 0,
+                next_retry_at: 0,
+                delivery_failed: false,
+                incidents: [],
+              },
+        ),
+        { status: url.endsWith('/test') ? 502 : 200 },
+      ),
+    ),
+  )
+  vi.stubGlobal('fetch', fetcher)
+  render(
+    <QueryClientProvider client={client}>
+      <WorkspaceAlerts userID={1} />
+    </QueryClientProvider>,
+  )
+  const user = userEvent.setup()
+  await user.click(
+    await screen.findByRole('button', { name: 'Send test notification' }),
+  )
+  expect(
+    await screen.findByText(
+      'Test delivery failed. Check the saved destination and try again after one minute.',
+    ),
+  ).toBeTruthy()
+  expect(
+    fetcher.mock.calls.filter(([url]) => url.endsWith('/test')),
+  ).toHaveLength(1)
+})
+
 it('saves optional workspace notifications and clears the entered secret', async () => {
   const client = createQueryClient()
   client.setQueryData(authKey, authenticated)
@@ -54,6 +97,8 @@ it('saves optional workspace notifications and clears the entered secret', async
       enabled: true,
       url: 'https://hooks.example.test/synthetic-secret',
       clear: false,
+      quota_threshold: 0,
+      model_alerts: false,
     },
   ])
 })

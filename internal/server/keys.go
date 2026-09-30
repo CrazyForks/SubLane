@@ -37,6 +37,7 @@ func (h *keyHTTP) register(router chi.Router) {
 		keys.Post("/{id}/revoke", h.revoke)
 		keys.Post("/{id}/secret", h.reveal)
 		keys.Get("/{id}/models", h.catalog)
+		keys.Get("/{id}/models/availability", h.availability)
 		keys.Patch("/{id}", h.update)
 	})
 }

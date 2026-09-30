@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import {
   alertOptions,
   saveAlerts,
+  testAlerts,
   alertNames,
   alertError,
   type AlertState,
@@ -20,6 +21,7 @@ export function WorkspaceAlerts({ userID }: { userID: number }) {
   const zone = useTimeZone()
   const query = useQuery(alertOptions(userID))
   const [editing, setEditing] = useState(false)
+  const test = useAdminMutation({ userID, mutationFn: testAlerts })
   const value = query.data
   return (
     <section
@@ -70,6 +72,27 @@ export function WorkspaceAlerts({ userID }: { userID: number }) {
               <p className="text-sm text-muted-foreground">
                 {value.destination}
               </p>
+            )}
+            {value.configured && !editing && (
+              <div className="space-y-2">
+                <Button
+                  variant="outline"
+                  disabled={test.isPending}
+                  onClick={() => test.mutate()}
+                >
+                  {t(test.isPending ? 'alertsTesting' : 'alertsTest')}
+                </Button>
+                {test.isSuccess && (
+                  <p role="status" className="text-sm text-success">
+                    {t('alertsTestSuccess')}
+                  </p>
+                )}
+                {test.isError && (
+                  <p role="alert" className="text-sm text-error">
+                    {t(alertError(test.error))}
+                  </p>
+                )}
+              </div>
             )}
             {value.delivery_failed && (
               <p role="alert" className="text-sm text-error">
@@ -137,6 +160,10 @@ function AlertForm({
   const [enabled, setEnabled] = useState(value.enabled)
   const [url, setURL] = useState('')
   const [clear, setClear] = useState(false)
+  const [quotaThreshold, setQuotaThreshold] = useState(
+    String(value.quota_threshold || ''),
+  )
+  const [modelAlerts, setModelAlerts] = useState(value.model_alerts)
   const mutation = useAdminMutation<AlertState, AlertInput>({
     userID,
     mutationFn: saveAlerts,
@@ -149,7 +176,13 @@ function AlertForm({
   })
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    mutation.mutate({ enabled, url, clear })
+    mutation.mutate({
+      enabled,
+      url,
+      clear,
+      quota_threshold: Number(quotaThreshold || 0),
+      model_alerts: modelAlerts,
+    })
   }
   return (
     <form
@@ -169,6 +202,35 @@ function AlertForm({
         {t('alertsEnable')}
       </label>
       <div className="space-y-2">
+        <label className="flex items-center gap-3 text-sm">
+          <input
+            type="checkbox"
+            checked={modelAlerts}
+            disabled={clear || mutation.isPending}
+            onChange={(event) => setModelAlerts(event.target.checked)}
+          />
+          {t('alertsModelEnable')}
+        </label>
+        <label htmlFor="quota-alert-threshold" className="text-sm font-medium">
+          {t('alertsQuotaThreshold')}
+        </label>
+        <Input
+          id="quota-alert-threshold"
+          type="number"
+          min={1}
+          max={99}
+          step={1}
+          value={quotaThreshold}
+          disabled={clear || mutation.isPending}
+          onChange={(event) => setQuotaThreshold(event.target.value)}
+          aria-describedby="quota-alert-hint"
+        />
+        <p
+          id="quota-alert-hint"
+          className="text-xs leading-5 text-muted-foreground"
+        >
+          {t('alertsQuotaHint')}
+        </p>
         <label htmlFor="webhook-url" className="text-sm font-medium">
           {t('alertsURL')}
         </label>

@@ -66,6 +66,7 @@ var actions = map[string]string{
 	"allocation.save": "allocation", "allocation.settle": "allocation", "allocation.reconcile": "allocation", "allocation.delete": "allocation",
 	"backup.export": "backup", "backup.prepare": "backup", "backup.verify": "backup",
 	"settings.update": "settings",
+	"settings.test":   "settings",
 	"key.reveal":      "key", "key.create": "key", "key.update": "key", "key.revoke": "key",
 	"group.create": "group", "group.update": "group",
 	"member.budget": "member", "member.budget_settle": "member", "member.create": "member", "member.update": "member", "member.groups": "member", "member.limits": "member", "member.password": "member",

@@ -208,7 +208,7 @@ func TestPoolAlertIgnoresIsolatedFailuresUntilAnAccountEntersCooldown(t *testing
 	if _, err := s.conn.Exec("INSERT INTO account_runtime(account_id,failures,cooldown_until) VALUES(?,1,0) ON CONFLICT(account_id) DO UPDATE SET failures=1,cooldown_until=0", id); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.observe(ctx, 1); err != nil {
+	if err := s.observe(ctx, 1, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	state, err := s.State(ctx, 1)
@@ -218,7 +218,7 @@ func TestPoolAlertIgnoresIsolatedFailuresUntilAnAccountEntersCooldown(t *testing
 	if _, err := s.conn.Exec("UPDATE account_runtime SET cooldown_until=1900000300 WHERE account_id=?", id); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.observe(ctx, 1); err != nil {
+	if err := s.observe(ctx, 1, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	state, err = s.State(ctx, 1)

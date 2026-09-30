@@ -27,6 +27,27 @@ func (h *alertHTTP) register(router chi.Router) {
 		value, err := h.service.State(r.Context(), h.tenantID)
 		h.respond(w, value, err)
 	})
+	router.Post("/test", func(w http.ResponseWriter, r *http.Request) {
+		var input struct{}
+		if !decodeJSONLimit(w, r, &input, 4096) {
+			return
+		}
+		err := h.service.Test(r.Context(), h.tenantID)
+		if errors.Is(err, alerts.ErrTestCooling) {
+			w.Header().Set("Retry-After", "60")
+			writeJSON(w, 429, map[string]string{"error": "alert_test_cooling"})
+			return
+		}
+		if errors.Is(err, alerts.ErrDelivery) {
+			writeJSON(w, 502, map[string]string{"error": "alert_delivery_failed"})
+			return
+		}
+		if err != nil {
+			h.respond(w, alerts.State{}, err)
+			return
+		}
+		writeJSON(w, 200, map[string]bool{"delivered": true})
+	})
 	router.Put("/", func(w http.ResponseWriter, r *http.Request) {
 		var input alerts.Input
 		if !decodeJSONLimit(w, r, &input, 4096) {

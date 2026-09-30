@@ -1,6 +1,41 @@
 import type { en } from './en'
 
 export const zh: Record<keyof typeof en, string> = {
+  availabilityTitle: '账号池模型可用状态',
+  availabilityModel: '要检查的模型 ID',
+  availabilityInspect: '检查 {{model}}',
+  availabilityCheck: '检查状态',
+  availabilityChecking: '正在检查状态…',
+  availabilityHint:
+    '这是新请求准入条件的本地快照，不会发送生成请求。密钥、成员和用量分配限制仍然适用；已有对话保持原账号绑定。',
+  availabilityFailed: '无法更新状态快照，请重新检查。',
+  availabilityEligible: '可接收新请求',
+  availabilityUnknown: '可用状态未知',
+  availabilityUnavailable: '暂无符合条件的账号',
+  availabilitySummary:
+    '{{available}} 个符合条件 · {{unknown}} 个模型支持情况未知',
+  availabilityRetryAt: '已知可重试时间：{{date}}',
+  availabilityObserved: '检查时间：{{date}}',
+  availabilityAccounts: '账号准入情况',
+  availabilityConcurrency: '并发 {{active}} / {{limit}}',
+  availabilityQuotaUsed: '额度已用 {{percent}}%',
+  availabilityQuotaUnknown: '额度信息不可用或已过期',
+  availabilityDisabled: '账号已停用',
+  availabilityProviderDisabled: '服务商已停用',
+  availabilityReauthorize: '需要重新授权',
+  availabilityNoAccounts: '账号池尚未添加账号',
+  alertsTest: '发送测试通知',
+  alertsTesting: '正在发送测试…',
+  alertsTestSuccess: '已保存的接收地址成功接受测试通知。',
+  alertsTestFailed: '测试投递失败，请检查已保存地址，一分钟后重试。',
+  alertsTestCooling: '测试通知之间需间隔一分钟。',
+  alertsModelEnable: '账号池中模型没有可用账号时通知',
+  alertsQuotaThreshold: '额度已用达到以下百分比时通知',
+  alertsQuotaHint:
+    '填写 1–99；留空关闭。只使用新鲜且适用于对应模型的额度快照，未知信息不代表故障恢复。',
+  alertModelUnavailable: '账号池模型不可用',
+  alertQuotaLow: '账号额度达到提醒阈值',
+  auditSettingsTest: '请求发送 Webhook 测试',
   modelPrices: '模型价格',
   pricingDescription:
     '当前参考单价用于请求费用估算和新建额度版本，并非订阅实际账单。已有额度版本按各自保存的价格计算。价格目录不代表模型使用权限，可用模型请查看密钥的模型列表。',

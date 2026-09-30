@@ -40,11 +40,18 @@ func (s *Service) readModelRuntime(ctx context.Context, q *db.Queries, id, model
 
 func (s *Service) modelAdmission(ctx context.Context, q *db.Queries, id, model string) error {
 	state, err := s.readModelRuntime(ctx, q, id, model)
-	if err != nil || state == nil {
+	if err != nil {
 		return err
 	}
-	if state.cooldownUntil > s.now().Unix() {
-		return &CoolingError{RetryAfter: state.cooldownUntil - s.now().Unix(), Model: state.key.model}
+	return modelRuntimeAdmission(state, s.now().Unix(), upstream.CatalogModelID(model))
+}
+
+func modelRuntimeAdmission(state *modelRuntime, now int64, model string) error {
+	if state == nil {
+		return nil
+	}
+	if state.cooldownUntil > now {
+		return &CoolingError{RetryAfter: state.cooldownUntil - now, Model: model}
 	}
 	if state.failures > 0 && state.inFlight > 0 {
 		return ErrAccountBusy

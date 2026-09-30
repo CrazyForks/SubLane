@@ -11,6 +11,7 @@ import { authKey, type AuthState } from '@/lib/auth'
 import { useAdminMutation } from '@/hooks/use-admin-mutation'
 import { Button } from './ui/Button'
 import { Input } from './ui/Input'
+import { ModelAvailability } from './ModelAvailability'
 import {
   Dialog,
   DialogContent,
@@ -62,6 +63,7 @@ function CatalogContent({
   const options = catalogOptions(client, target)
   const query = useQuery(options)
   const [filter, setFilter] = useState('')
+  const [inspectedModel, setInspectedModel] = useState('')
   const [now, setNow] = useState(Date.now)
   const [ownerID] = useState(
     () => client.getQueryData<AuthState>(authKey)?.user?.id,
@@ -187,7 +189,18 @@ function CatalogContent({
                     key={model}
                     className="break-all py-2.5 font-mono text-xs"
                   >
-                    {model}
+                    {target.kind === 'account' ? (
+                      model
+                    ) : (
+                      <button
+                        type="button"
+                        className="w-full break-all rounded-sm text-left hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+                        aria-label={t('availabilityInspect', { model })}
+                        onClick={() => setInspectedModel(model)}
+                      >
+                        {model}
+                      </button>
+                    )}
                   </li>
                 ))}
               </ul>
@@ -215,6 +228,14 @@ function CatalogContent({
             </p>
           )}
         </>
+      )}
+      {target.kind !== 'account' && (
+        <ModelAvailability
+          key={inspectedModel}
+          target={target}
+          model={inspectedModel}
+          onInspect={setInspectedModel}
+        />
       )}
     </DialogContent>
   )

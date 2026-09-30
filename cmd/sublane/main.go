@@ -157,6 +157,7 @@ func run() error {
 		gateway.MaintainHistory(maintenanceCtx, db)
 	}()
 	defer func() { stopMaintenance(); <-maintenanceDone }()
+	notifications.SetCapacityObserver(registry.Capacity)
 	notifications.Start(ctx)
 	return serve(ctx, logger, cfg.Addr, server.NewMulti(db, authentication, tenancy, cfg.PublicURL, registry.Handler))
 }

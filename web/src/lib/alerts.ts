@@ -3,6 +3,8 @@ import { queryOptions } from '@tanstack/react-query'
 import { ApiError, request } from './request'
 
 const alertSchema = z.object({
+  quota_threshold: z.number().int().min(0).max(99).default(0),
+  model_alerts: z.boolean().default(false),
   enabled: z.boolean(),
   configured: z.boolean(),
   destination: z.string().max(300),
@@ -16,15 +18,29 @@ const alertSchema = z.object({
           'account_reauthorization',
           'pool_unavailable',
           'request_failures',
+          'model_unavailable',
+          'quota_low',
         ]),
-        subject: z.string().max(64),
+        subject: z.string().max(160),
         since: z.number().int(),
       }),
     )
-    .max(1000),
+    .max(8192),
 })
 export type AlertState = z.infer<typeof alertSchema>
-export type AlertInput = { enabled: boolean; url: string; clear: boolean }
+export type AlertInput = {
+  enabled: boolean
+  url: string
+  clear: boolean
+  quota_threshold: number
+  model_alerts: boolean
+}
+export const testAlerts = (_input: void, signal: AbortSignal) =>
+  request('/api/alerts/test', z.object({ delivered: z.literal(true) }), {
+    method: 'POST',
+    body: '{}',
+    signal,
+  })
 export const alertOptions = (userID: number) =>
   queryOptions({
     queryKey: ['workspace-alerts', userID],
@@ -41,6 +57,8 @@ export function alertError(error: unknown) {
   if (error instanceof ApiError) {
     if (error.code === 'demo_read_only') return 'demoReadOnly'
     if (error.code === 'invalid_alert_settings') return 'alertsInvalid'
+    if (error.code === 'alert_delivery_failed') return 'alertsTestFailed'
+    if (error.code === 'alert_test_cooling') return 'alertsTestCooling'
   }
   return 'alertsUnavailable'
 }
@@ -48,4 +66,6 @@ export const alertNames = {
   account_reauthorization: 'alertReauthorization',
   pool_unavailable: 'alertPoolUnavailable',
   request_failures: 'alertRequestFailures',
+  model_unavailable: 'alertModelUnavailable',
+  quota_low: 'alertQuotaLow',
 } as const

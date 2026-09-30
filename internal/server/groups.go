@@ -30,6 +30,7 @@ func (h *groupHTTP) register(router chi.Router) {
 	router.Get("/{id}", h.get)
 	router.Get("/{id}/members", h.poolMembers)
 	router.Get("/{id}/models", h.catalog)
+	router.Get("/{id}/models/availability", h.availability)
 	router.Patch("/{id}", h.update)
 	router.Get("/members/{id}", h.memberGroups)
 	router.Put("/members/{id}", h.setMemberGroups)

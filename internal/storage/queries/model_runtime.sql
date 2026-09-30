@@ -6,6 +6,12 @@ LEFT JOIN account_model_runtime m ON m.account_id=a.id AND m.model=sqlc.arg(mode
  AND m.lifecycle=a.models_revision AND m.runtime_revision=COALESCE(ar.revision,0)
 WHERE a.id=sqlc.arg(target_id) AND a.tenant_id=sqlc.arg(workspace_id);
 
+-- name: ListAvailabilityModelLimits :many
+SELECT m.model,m.cooldown_until,m.failures FROM account_model_runtime m
+JOIN accounts a ON a.id=m.account_id LEFT JOIN account_runtime ar ON ar.account_id=a.id
+WHERE a.id=sqlc.arg(target_id) AND a.tenant_id=sqlc.arg(workspace_id)
+ AND m.lifecycle=a.models_revision AND m.runtime_revision=COALESCE(ar.revision,0);
+
 -- name: SaveAccountModelRuntime :one
 INSERT INTO account_model_runtime(account_id,model,cooldown_until,failures,lifecycle,runtime_revision,version)
 SELECT a.id,sqlc.arg(model),sqlc.arg(cooldown_until),sqlc.arg(failures),a.models_revision,sqlc.arg(runtime_revision),1

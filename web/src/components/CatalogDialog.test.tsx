@@ -7,6 +7,76 @@ import { authKey } from '@/lib/auth'
 import { authenticated } from '@/test/fixtures'
 import { CatalogDialog } from './CatalogDialog'
 
+it('inspects a pool model on demand and explains an unavailable snapshot', async () => {
+  const fetcher = vi.fn((url: string) =>
+    Promise.resolve(
+      new Response(
+        JSON.stringify(
+          url.includes('/availability?')
+            ? {
+                model: 'synthetic-basic',
+                state: 'unavailable',
+                available: 0,
+                unknown: 0,
+                retry_at: 1900000060,
+                server_time: 1900000010,
+                reasons: [{ code: 'quota_exhausted', count: 1 }],
+                accounts: [
+                  {
+                    id: 'synthetic-account',
+                    name: 'Synthetic subscription',
+                    provider: 'codex',
+                    reason: 'quota_exhausted',
+                    quota_state: 'exhausted',
+                    retry_at: 1900000060,
+                    in_flight: 0,
+                    max_concurrency: 10,
+                  },
+                ],
+              }
+            : {
+                models: [
+                  {
+                    id: 'synthetic-basic',
+                    object: 'model',
+                    owned_by: 'openai',
+                  },
+                ],
+                known_accounts: 1,
+                unknown_accounts: 0,
+                stale_accounts: 0,
+                refreshing: false,
+                refresh_failed: false,
+                server_time: 1900000010,
+              },
+        ),
+      ),
+    ),
+  )
+  vi.stubGlobal('fetch', fetcher)
+  const client = createQueryClient()
+  client.setQueryData(authKey, authenticated)
+  render(
+    <QueryClientProvider client={client}>
+      <CatalogDialog target={{ kind: 'group', id: 7 }} name="Synthetic pool" />
+    </QueryClientProvider>,
+  )
+  const user = userEvent.setup()
+  await user.click(
+    screen.getByRole('button', { name: 'Models for Synthetic pool' }),
+  )
+  await user.click(
+    await screen.findByRole('button', { name: 'Inspect synthetic-basic' }),
+  )
+  expect(await screen.findByText('No eligible account')).toBeTruthy()
+  expect(screen.getByText('Synthetic subscription')).toBeTruthy()
+  expect(
+    fetcher.mock.calls.filter(([url]) =>
+      String(url).includes('/availability?'),
+    ),
+  ).toHaveLength(1)
+})
+
 const snapshot = {
   models: ['synthetic-basic'],
   updated_at: 1900000000,

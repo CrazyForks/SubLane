@@ -8,22 +8,29 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/murongg/SubLane/internal/audit"
+	"github.com/murongg/SubLane/internal/capacity"
 	"github.com/murongg/SubLane/internal/storage/db"
 	"github.com/murongg/SubLane/internal/vault"
 )
 
 type Input struct {
-	Enabled bool   `json:"enabled"`
-	URL     string `json:"url"`
-	Clear   bool   `json:"clear"`
+	QuotaThreshold int    `json:"quota_threshold"`
+	ModelAlerts    bool   `json:"model_alerts"`
+	Enabled        bool   `json:"enabled"`
+	URL            string `json:"url"`
+	Clear          bool   `json:"clear"`
 }
 type configuration struct {
-	Enabled  bool   `json:"enabled"`
-	Endpoint []byte `json:"endpoint,omitempty"`
+	QuotaThreshold int    `json:"quota_threshold,omitempty"`
+	ModelAlerts    bool   `json:"model_alerts,omitempty"`
+	TestedAt       int64  `json:"tested_at,omitempty"`
+	Enabled        bool   `json:"enabled"`
+	Endpoint       []byte `json:"endpoint,omitempty"`
 }
 type Incident struct {
 	Kind    string `json:"kind"`
@@ -31,6 +38,8 @@ type Incident struct {
 	Since   int64  `json:"since"`
 }
 type State struct {
+	QuotaThreshold  int        `json:"quota_threshold"`
+	ModelAlerts     bool       `json:"model_alerts"`
 	Enabled         bool       `json:"enabled"`
 	Configured      bool       `json:"configured"`
 	Destination     string     `json:"destination"`
@@ -48,24 +57,26 @@ type Event struct {
 	ObservedAt  int64  `json:"observed_at"`
 }
 type Service struct {
-	conn     *sql.DB
-	queries  *db.Queries
-	vault    *vault.Vault
-	sender   Sender
-	now      func() time.Time
-	mu       sync.Mutex
-	checking sync.Mutex
-	cancel   context.CancelFunc
-	done     chan struct{}
-	wake     chan struct{}
-	flights  map[int64]context.CancelFunc
+	conn             *sql.DB
+	queries          *db.Queries
+	vault            *vault.Vault
+	sender           Sender
+	now              func() time.Time
+	mu               sync.Mutex
+	checking         sync.Mutex
+	cancel           context.CancelFunc
+	done             chan struct{}
+	wake             chan struct{}
+	flights          map[int64]context.CancelFunc
+	testFlights      map[int64]context.CancelFunc
+	capacityObserver func(context.Context, int64) ([]capacity.Pool, error)
 }
 
 func New(conn *sql.DB, cipher *vault.Vault, sender Sender) *Service {
 	if sender == nil {
 		sender = newSender()
 	}
-	return &Service{conn: conn, queries: db.New(conn), vault: cipher, sender: sender, now: time.Now, wake: make(chan struct{}, 1), flights: make(map[int64]context.CancelFunc)}
+	return &Service{conn: conn, queries: db.New(conn), vault: cipher, sender: sender, now: time.Now, wake: make(chan struct{}, 1), flights: make(map[int64]context.CancelFunc), testFlights: make(map[int64]context.CancelFunc)}
 }
 
 func (s *Service) Verify(ctx context.Context) error {
@@ -107,6 +118,8 @@ func (s *Service) state(ctx context.Context, tenantID int64) (State, error) {
 		return result, ErrInput
 	}
 	result.Enabled = cfg.Enabled
+	result.QuotaThreshold = cfg.QuotaThreshold
+	result.ModelAlerts = cfg.ModelAlerts
 	result.Configured = len(cfg.Endpoint) > 0
 	if result.Configured {
 		plain, err := s.vault.OpenWebhook(tenantID, cfg.Endpoint)
@@ -144,6 +157,9 @@ func (s *Service) Update(ctx context.Context, tenantID int64, input Input) (Stat
 	if input.Clear && (input.Enabled || input.URL != "") {
 		return State{}, ErrInput
 	}
+	if input.QuotaThreshold < 0 || input.QuotaThreshold > 99 {
+		return State{}, ErrInput
+	}
 	raw, err := s.queries.GetAlertConfig(ctx, tenantID)
 	if err != nil {
 		return State{}, err
@@ -153,6 +169,8 @@ func (s *Service) Update(ctx context.Context, tenantID int64, input Input) (Stat
 		return State{}, ErrInput
 	}
 	cfg.Enabled = input.Enabled
+	cfg.QuotaThreshold = input.QuotaThreshold
+	cfg.ModelAlerts = input.ModelAlerts
 	if input.Clear {
 		cfg.Endpoint = nil
 	}
@@ -196,6 +214,9 @@ func (s *Service) Update(ctx context.Context, tenantID int64, input Input) (Stat
 	if cancel := s.flights[tenantID]; cancel != nil {
 		cancel()
 	}
+	if cancel := s.testFlights[tenantID]; cancel != nil {
+		cancel()
+	}
 	select {
 	case s.wake <- struct{}{}:
 	default:
@@ -211,7 +232,7 @@ func newEventID() string {
 	return hex.EncodeToString(value[:])
 }
 
-func (s *Service) observe(ctx context.Context, tenantID int64) error {
+func (s *Service) observe(ctx context.Context, tenantID int64, extra []db.ListAlertSignalsRow, unknown map[string]bool) error {
 	tx, err := s.conn.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -222,6 +243,7 @@ func (s *Service) observe(ctx context.Context, tenantID int64) error {
 	if err != nil {
 		return err
 	}
+	signals = append(signals, extra...)
 	states, err := q.ListAlertStates(ctx, tenantID)
 	if err != nil {
 		return err
@@ -237,6 +259,11 @@ func (s *Service) observe(ctx context.Context, tenantID int64) error {
 		existing[state.Kind+":"+state.Subject] = state
 	}
 	for key, state := range existing {
+		// Missing or stale observations cannot prove an incident has recovered.
+		uncertain := unknown[key] || (state.Kind == "model_unavailable" && unknown["model_unavailable:"+strings.SplitN(state.Subject, ":", 2)[0]+":*"]) || (state.Kind == "quota_low" && unknown["quota_low:*"]) || (unknown["capacity_unavailable"] && (state.Kind == "model_unavailable" || state.Kind == "quota_low"))
+		if uncertain && !current[key] {
+			continue
+		}
 		active := int64(0)
 		if current[key] {
 			active = 1
@@ -288,8 +315,22 @@ func (s *Service) checkWorkspace(ctx context.Context, tenantID int64, remaining 
 		return err
 	}
 	plain, err := s.vault.OpenWebhook(tenantID, cfg.Endpoint)
+	observer := s.capacityObserver
+	s.mu.Unlock()
+	extra, unknown, errCapacity := observeCapacity(ctx, observer, tenantID, cfg)
+	s.mu.Lock()
+	latest, changedErr := s.queries.GetAlertConfig(ctx, tenantID)
+	if changedErr != nil || latest != raw {
+		s.mu.Unlock()
+		return changedErr
+	}
+	// Capacity observation failures retain those incidents while base signals still run.
+	if errCapacity != nil {
+		extra = nil
+		unknown = map[string]bool{"capacity_unavailable": true}
+	}
 	if err == nil {
-		err = s.observe(ctx, tenantID)
+		err = s.observe(ctx, tenantID, extra, unknown)
 	}
 	var states []db.AlertState
 	if err == nil {
@@ -369,6 +410,9 @@ func (s *Service) Start(parent context.Context) {
 func (s *Service) Close() {
 	s.mu.Lock()
 	cancel, done := s.cancel, s.done
+	for _, stop := range s.testFlights {
+		stop()
+	}
 	s.mu.Unlock()
 	if cancel != nil {
 		cancel()

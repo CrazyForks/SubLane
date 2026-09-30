@@ -81,23 +81,26 @@ func (s *Service) accountQuota(ctx context.Context, q *db.Queries, account accou
 		return quotaDecision{}, err
 	}
 	if value := savedUsage(row); value != nil {
-		if account.Provider == "antigravity" {
-			// Only an exact native model match can deny a request. Never infer an
-			// account-wide limit or a mapping from another model's name.
-			id := upstream.CatalogModelID(model)
-			for _, limit := range value.Limits {
-				if id != "" && limit.Name == id {
-					limit.Name = ""
-					selected := *value
-					selected.Limits = []upstream.UsageLimit{limit}
-					return quotaStatus(selected, s.now()), nil
-				}
-			}
-			return quotaDecision{State: "unknown"}, nil
-		}
-		return quotaStatus(*value, s.now()), nil
+		return quotaStatus(quotaForModel(*value, account.Provider, model), s.now()), nil
 	}
 	return quotaDecision{State: "unknown"}, nil
+}
+
+func quotaForModel(value upstream.Usage, provider, model string) upstream.Usage {
+	if provider != "antigravity" {
+		return value
+	}
+	// Exact model matching keeps one Antigravity limit from blocking unrelated models.
+	id := upstream.CatalogModelID(model)
+	for _, limit := range value.Limits {
+		if id != "" && limit.Name == id {
+			limit.Name = ""
+			value.Limits = []upstream.UsageLimit{limit}
+			return value
+		}
+	}
+	value.Limits = nil
+	return value
 }
 func (s *Service) quotaAdmission(ctx context.Context, q *db.Queries, account accounts.Account, model string) error {
 	decision, err := s.accountQuota(ctx, q, account, model)

@@ -109,6 +109,47 @@ func (q *Queries) GetAccountModelRuntime(ctx context.Context, arg GetAccountMode
 	return i, err
 }
 
+const listAvailabilityModelLimits = `-- name: ListAvailabilityModelLimits :many
+SELECT m.model,m.cooldown_until,m.failures FROM account_model_runtime m
+JOIN accounts a ON a.id=m.account_id LEFT JOIN account_runtime ar ON ar.account_id=a.id
+WHERE a.id=?1 AND a.tenant_id=?2
+ AND m.lifecycle=a.models_revision AND m.runtime_revision=COALESCE(ar.revision,0)
+`
+
+type ListAvailabilityModelLimitsParams struct {
+	TargetID    string
+	WorkspaceID int64
+}
+
+type ListAvailabilityModelLimitsRow struct {
+	Model         string
+	CooldownUntil int64
+	Failures      int64
+}
+
+func (q *Queries) ListAvailabilityModelLimits(ctx context.Context, arg ListAvailabilityModelLimitsParams) ([]ListAvailabilityModelLimitsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listAvailabilityModelLimits, arg.TargetID, arg.WorkspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAvailabilityModelLimitsRow{}
+	for rows.Next() {
+		var i ListAvailabilityModelLimitsRow
+		if err := rows.Scan(&i.Model, &i.CooldownUntil, &i.Failures); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const saveAccountModelRuntime = `-- name: SaveAccountModelRuntime :one
 INSERT INTO account_model_runtime(account_id,model,cooldown_until,failures,lifecycle,runtime_revision,version)
 SELECT a.id,?1,?2,?3,a.models_revision,?4,1
